@@ -50,13 +50,13 @@
 
   <Package
     Name="$(Identity)"
-    Manufacturer="Carmine Paolino"
+    Manufacturer="TheBestIT (Spotifast Spicy Lyrics fork)"
     Version="$(Version)"
     UpgradeCode="$(UpgradeCode)"
     Scope="perUser"
     Language="1033"
     Codepage="1252">
-    <SummaryInformation Description="$(Identity)" Comments="© 2026 Carmine Paolino" />
+    <SummaryInformation Description="$(Identity)" Comments="© 2026 Carmine Paolino; fork changes © 2026 TheBestIT" />
 
     <!-- Inside the transaction: if the new version fails, the old one comes back. -->
     <MajorUpgrade
@@ -74,9 +74,9 @@
 
     <Icon Id="spotifast.ico" SourceFile="$(Icon)" />
     <Property Id="ARPPRODUCTICON" Value="spotifast.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://spotifast.rocks" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/crmne/spotifast/issues" />
-    <Property Id="ARPURLUPDATEINFO" Value="https://spotifast.rocks/download/" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/TheBestIT/spotifast-spicylyrics" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/TheBestIT/spotifast-spicylyrics/issues" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/TheBestIT/spotifast-spicylyrics/releases" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
     <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" Sequence="execute" />

@@ -12,9 +12,9 @@ libraries:
     rpm: alsa-lib
 nfpm:
   name: spotifast
-  maintainer: Carmine Paolino <carmine@paolino.me>
-  homepage: https://github.com/crmne/spotifast
-  description: A native Spotify client
+  maintainer: TheBestIT <75973639+TheBestIT@users.noreply.github.com>
+  homepage: https://github.com/TheBestIT/spotifast-spicylyrics
+  description: A native Spotify client with Spicy Lyrics karaoke lyrics (fork of Spotifast)
   license: MIT
   contents:
   # A glob source makes nFPM append its basename to the destination directory.
@@ -151,7 +151,7 @@ targets:
       command: [python, packaging/windows/build-msi.py, '@PAYLOAD@', '@PACKAGE@', '@VERSION@', '@ARCH@']
       output: 'spotifast-@TAG@-@TARGET@.msi'
 release:
-  repository: crmne/spotifast
+  repository: TheBestIT/spotifast-spicylyrics
   prereleases: true
   checksums: checksums.txt
 assets:

@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Contribution and project scope
-    url: https://github.com/crmne/spotifast/blob/main/CONTRIBUTING.md
-    about: Check product boundaries and contribution requirements before opening an issue or pull request.
-  - name: Documentation
+  - name: Problems that are not about lyrics
+    url: https://github.com/crmne/spotifast/issues
+    about: This fork changes only the lyrics. Check whether the problem also happens in the original Spotifast, and report it there if it does.
+  - name: Spotifast documentation
     url: https://spotifast.rocks
-    about: Install steps, settings, and where Spotifast keeps its files and logs.
+    about: Install steps, settings, and where Spotifast keeps its files and logs. They apply to this fork too.
+  - name: Spicy Lyrics keys and service
+    url: https://developers.spicylyrics.org/docs
+    about: How Spicy Lyrics keys work, and the terms of the service.

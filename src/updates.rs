@@ -20,9 +20,15 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     },
     // Releases publish an Ed25519 signature for checksums.txt. Require it
     // before downloading an update, using the release workflow's public key.
+    // This fork signs with its own key, so an upstream build can never be
+    // installed over it by the updater, and the other way round.
     publisher_key: Some(include_str!("../assets/update-public-key.hex")),
+    // Fork versions carry a suffix (0.13.3-spicy.1), which semver reads as a
+    // pre-release. The channel considers every release of this repository
+    // and takes the highest, so fork builds update from fork releases only.
+    prereleases: fastframe_update::Prereleases::WhenRunningPrerelease,
     ..UpdateConfig::new(
-        "crmne/spotifast",
+        "TheBestIT/spotifast-spicylyrics",
         "Spotifast",
         "spotifast",
         env!("CARGO_PKG_VERSION"),

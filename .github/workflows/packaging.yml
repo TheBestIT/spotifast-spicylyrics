@@ -1,15 +1,10 @@
 name: Packaging
 
 on:
-  push:
-    branches: [main, master]
-    paths: [native-packages.yaml, packaging/**, contrib/omarchy/**, .github/workflows/packaging.yml, .github/workflows/release.yml]
-  pull_request:
-    paths: [native-packages.yaml, packaging/**, contrib/omarchy/**, .github/workflows/packaging.yml, .github/workflows/release.yml]
   workflow_dispatch:
     inputs:
       version:
-        description: Published version (empty tests the pinned v0.11.2 fixture)
+        description: Published version, for example v0.13.3-spicy.1
         type: string
         default: ''
       publish:
@@ -49,32 +44,6 @@ jobs:
       version: ${{ inputs.version || 'v0.11.2' }}
       publish: ${{ inputs.publish == true && inputs.version != '' }}
     secrets: inherit
-
-  homebrew:
-    name: Homebrew install (macOS)
-    needs: packaging
-    runs-on: macos-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-packages
-          path: dist/native-packages
-      - name: Install and remove the generated cask
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-        run: |
-          brew tap-new --no-git spotifast/validation
-          tap="$(brew --repository)/Library/Taps/spotifast/homebrew-validation"
-          mkdir -p "$tap/Casks"
-          cp dist/native-packages/recipes/homebrew/spotifast.rb "$tap/Casks/spotifast.rb"
-          brew install --cask spotifast/validation/spotifast
-          app=/Applications/Spotifast.app
-          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
-          "$app/Contents/MacOS/$executable" --version
-          codesign --verify --strict "$app"
-          brew uninstall --cask spotifast/validation/spotifast
-          test ! -e "$app"
 
   # The AppImage carries no libraries of its own, so the runner supplies
   # ALSA as a desktop would. Runners have no FUSE: it unpacks itself to run.

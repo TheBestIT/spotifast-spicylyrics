@@ -37,11 +37,11 @@ AppId={{FCED1EA0-EBF5-4C32-BA3B-A3AD724BACC3}
 AppName={#AppName}
 AppVersion={#Version}
 AppVerName={#AppName} {#Version}
-AppPublisher=Carmine Paolino
-AppCopyright=© 2026 Carmine Paolino
-AppPublisherURL=https://spotifast.rocks
-AppSupportURL=https://github.com/crmne/spotifast/issues
-AppUpdatesURL=https://spotifast.rocks/download/
+AppPublisher=TheBestIT (Spotifast Spicy Lyrics fork)
+AppCopyright=© 2026 Carmine Paolino; fork changes © 2026 TheBestIT
+AppPublisherURL=https://github.com/TheBestIT/spotifast-spicylyrics
+AppSupportURL=https://github.com/TheBestIT/spotifast-spicylyrics/issues
+AppUpdatesURL=https://github.com/TheBestIT/spotifast-spicylyrics/releases
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -75,6 +75,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#Binary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\THIRD-PARTY-NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "spotifast-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
