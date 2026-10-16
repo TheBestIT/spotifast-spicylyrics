@@ -133,34 +133,6 @@ jobs:
             "/DOutputDir=$PWD\dist" packaging\windows\spotifast.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # The Windows Installer package, from the same binary. One release ships
-      # it beside the setup program: earlier versions update through the setup
-      # program, and their next update moves them to the package (PACKAGING.md).
-      - uses: ruby/setup-ruby@v1
-        if: runner.os == 'Windows'
-        with:
-          ruby-version: '4.0'
-      - name: Windows Installer package
-        # The MSI is a bonus beside the setup program and the zip; a fork
-        # version suffix must not hold the whole release back.
-        continue-on-error: true
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:PATH = "$env:RUNNER_TEMP\wix;$env:PATH"
-          gem install native-packages --version 0.9.0 --no-document
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $version = $env:GITHUB_REF_NAME.TrimStart("v")
-          $payload = "dist\msi-input-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force $payload | Out-Null
-          $files = "target\${{ matrix.target }}\release\spotifast.exe", "README.md", "LICENSE", "packaging\windows\spotifast-installer.txt"
-          Copy-Item $files $payload
-          $packages = "$env:RUNNER_TEMP\windows-packages"
-          native-packages build --version $version --target ${{ matrix.package-target }} --defer-recipes --output $packages
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item "$packages\packages\${{ matrix.package-target }}\msi\*.msi" dist\
 
       - uses: actions/upload-artifact@v7
         with:
@@ -169,7 +141,6 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/*-setup.exe
-            dist/*.msi
           if-no-files-found: error
 
   # The Linux build packaged as a Flatpak bundle: the same binary, in the
@@ -257,11 +228,11 @@ jobs:
           prerelease: false
           make_latest: true
 
-  packaging:
-    # The optional Flatpak job may fail without blocking native packages.
-    if: ${{ !cancelled() && needs.publish.result == 'success' && startsWith(github.ref, 'refs/tags/v') }}
+  # The .msi, .deb, .rpm and AppImage files, made from the published binaries.
+  packages:
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     needs: publish
-    uses: ./.github/workflows/packaging.yml
+    uses: ./.github/workflows/packages.yml
     with:
-      version: ${{ github.ref_name }}
+      tag: ${{ github.ref_name }}
     secrets: inherit

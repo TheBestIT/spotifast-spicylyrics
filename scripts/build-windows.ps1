@@ -78,7 +78,10 @@ if ($msvc) {
     exit 1
 }
 # 3. Build. Inside the repository, so rustup uses the pinned toolchain.
-$features = if ($WithMilkDrop) { @() } else { @("--no-default-features") }
+# A typed array: a one-item result of "if" is otherwise a plain string, and
+# splatting a string passes it to cargo one character at a time.
+[string[]]$features = @()
+if (-not $WithMilkDrop) { $features += "--no-default-features" }
 Push-Location $root
 try {
     rustup target add $target | Out-Null

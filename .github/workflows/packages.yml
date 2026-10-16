@@ -1,0 +1,161 @@
+name: Packages
+
+# Native packages for a published release: the Windows Installer (.msi) and
+# the Linux .deb, .rpm and AppImage files. They are made from the binaries
+# that the release already holds, then checksums.txt is written and signed
+# again so that it lists every file.
+#
+# The upstream project builds these with the native-packages tool, which
+# accepts only 1.2.3 and -alpha/-beta/-rc versions. Fork versions carry a
+# -spicy.N suffix, so this workflow calls the packagers directly.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.13.3-spicy.1
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      SPOTIFAST_UPDATE_SIGNING_KEY:
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag }}
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  msi:
+    name: MSI (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: amd64
+            msvc: x64
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            arch: arm64
+            msvc: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc }}
+      - name: Build and attach the MSI
+        shell: pwsh
+        run: |
+          $name = "spotifast-$env:TAG-${{ matrix.target }}"
+          gh release download $env:TAG --repo $env:GITHUB_REPOSITORY --pattern "$name.zip" --dir dl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Expand-Archive "dl\$name.zip" -DestinationPath dl
+          New-Item -ItemType Directory -Force payload | Out-Null
+          Copy-Item "dl\$name\spotifast.exe", README.md, LICENSE, packaging\windows\spotifast-installer.txt payload
+          dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:PATH = "$env:RUNNER_TEMP\wix;$env:PATH"
+          $msi = "spotifast-$env:TAG-windows-${{ matrix.arch }}.msi"
+          python packaging\windows\build-msi.py payload $msi $env:TAG.TrimStart("v") ${{ matrix.arch }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release upload $env:TAG $msi --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  linux:
+    name: deb, rpm and AppImage (${{ matrix.deb }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            deb: amd64
+            rpm: x86_64
+            appimage: x86_64
+            nfpm: x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            deb: arm64
+            rpm: aarch64
+            appimage: aarch64
+            nfpm: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack the release archive
+        run: |
+          name="spotifast-$TAG-${{ matrix.target }}"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name.tar.gz" --dir dl
+          tar xzf "dl/$name.tar.gz" -C dl
+          echo "PAYLOAD=$PWD/dl/$name" >> "$GITHUB_ENV"
+      - name: deb and rpm
+        run: |
+          curl -fsSL "https://github.com/goreleaser/nfpm/releases/download/v2.47.0/nfpm_2.47.0_Linux_${{ matrix.nfpm }}.tar.gz" | tar xz nfpm
+          sed -e "s|@PAYLOAD@|$PAYLOAD|g" -e "s|@VERSION@|${TAG#v}|g" -e "s|@ARCH@|${{ matrix.deb }}|g" \
+            packaging/linux/nfpm.yaml > nfpm.yaml
+          ./nfpm pkg --config nfpm.yaml --packager deb --target "spotifast-$TAG-${{ matrix.deb }}.deb"
+          ./nfpm pkg --config nfpm.yaml --packager rpm --target "spotifast-$TAG-${{ matrix.rpm }}.rpm"
+      - name: AppImage
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends file desktop-file-utils
+          app=AppDir
+          install -Dm755 "$PAYLOAD/spotifast" "$app/usr/bin/spotifast"
+          install -Dm644 packaging/applications/spotifast.desktop "$app/usr/share/applications/spotifast.desktop"
+          install -Dm644 packaging/icons/spotifast.svg "$app/usr/share/icons/hicolor/scalable/apps/spotifast.svg"
+          install -Dm644 "$PAYLOAD/LICENSE" "$app/usr/share/licenses/spotifast/LICENSE"
+          install -Dm644 "$PAYLOAD/THIRD-PARTY-NOTICES.md" "$app/usr/share/doc/spotifast/THIRD-PARTY-NOTICES.md"
+          cp packaging/applications/spotifast.desktop packaging/icons/spotifast.svg "$app/"
+          printf '#!/bin/sh\nhere="$(dirname "$(readlink -f "$0")")"\nexec "$here/usr/bin/spotifast" "$@"\n' > "$app/AppRun"
+          chmod +x "$app/AppRun"
+          curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage }}.AppImage"
+          chmod +x appimagetool
+          ARCH=${{ matrix.appimage }} APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream "$app" "spotifast-$TAG-${{ matrix.appimage }}.AppImage"
+      - name: Check that the packages install and start
+        run: |
+          sudo apt-get install -y "./spotifast-$TAG-${{ matrix.deb }}.deb"
+          spotifast --version
+          "./spotifast-$TAG-${{ matrix.appimage }}.AppImage" --appimage-extract-and-run --version
+          rpm -qip "spotifast-$TAG-${{ matrix.rpm }}.rpm" | head -5 || true
+      - name: Attach to the release
+        run: |
+          gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" \
+            "spotifast-$TAG-${{ matrix.deb }}.deb" \
+            "spotifast-$TAG-${{ matrix.rpm }}.rpm" \
+            "spotifast-$TAG-${{ matrix.appimage }}.AppImage"
+
+  checksums:
+    name: Checksums
+    needs: [msi, linux]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download every release file
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "spotifast-$TAG-*" --dir dist
+      - name: Write checksums.txt
+        run: python3 packaging/release-names.py dist "$TAG"
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0'
+      - name: Sign and attach checksums
+        env:
+          SPOTIFAST_UPDATE_SIGNING_KEY: ${{ secrets.SPOTIFAST_UPDATE_SIGNING_KEY }}
+        run: |
+          gem install native-packages --version 0.9.0 --no-document
+          native-packages sign-checksums dist/checksums.txt \
+            --public-key assets/update-public-key.hex \
+            --key-env SPOTIFAST_UPDATE_SIGNING_KEY
+          native-packages verify-checksums dist/checksums.txt \
+            --public-key assets/update-public-key.hex
+          gh release upload "$TAG" dist/checksums.txt dist/checksums.txt.sig --clobber --repo "$GITHUB_REPOSITORY"
