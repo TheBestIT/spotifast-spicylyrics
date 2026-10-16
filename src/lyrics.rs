@@ -32,11 +32,58 @@ pub struct Query {
     pub duration_ms: u32,
 }
 
+/// One sung unit inside a karaoke line, with its own start and end. A word
+/// may be several syllables; `part_of_word` is true when the next syllable
+/// continues the same word, so no space is drawn between them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Syllable {
+    pub text: String,
+    pub at_ms: u32,
+    pub end_ms: u32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub part_of_word: bool,
+    /// The syllable in Latin letters, for scripts such as Japanese.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub romanized: Option<String>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Line {
     /// When the line starts; `None` in lyrics that carry no timing.
     pub at_ms: Option<u32>,
     pub text: String,
+    /// When the line ends, for karaoke lyrics that carry it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<u32>,
+    /// Per-syllable timing, for word-by-word karaoke. Empty for line-synced
+    /// and plain lyrics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub syllables: Vec<Syllable>,
+    /// A harmony or echo sung under the lead line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background: Vec<Syllable>,
+    /// Drawn against the opposite edge, for a second voice.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub opposite: bool,
+    /// The whole line in Latin letters, with the spaces between words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub romanized: Option<String>,
+}
+
+impl Line {
+    /// The words to show: the romanized line when asked for and known,
+    /// otherwise the original.
+    pub fn display(&self, romanize: bool) -> &str {
+        match &self.romanized {
+            Some(romanized) if romanize => romanized,
+            _ => &self.text,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +93,10 @@ pub struct Lyrics {
     pub synced: bool,
     /// The database knows there are no words.
     pub instrumental: bool,
+    /// Lines carry per-syllable timing, so the words light up one at a time.
+    /// Always implies `synced`.
+    #[serde(default)]
+    pub rich: bool,
 }
 
 impl Lyrics {
@@ -59,6 +110,25 @@ impl Lyrics {
             .lines
             .partition_point(|line| line.at_ms.is_some_and(|at| at <= position_ms));
         started.checked_sub(1)
+    }
+
+    /// Some line has a romanized form, so the view can offer to show it.
+    pub fn has_romanization(&self) -> bool {
+        self.lines.iter().any(|line| line.romanized.is_some())
+    }
+}
+
+impl Syllable {
+    /// How far this syllable has been sung at `position_ms`, from 0 before it
+    /// starts to 1 once it ends.
+    pub fn progress(&self, position_ms: u32) -> f32 {
+        if position_ms >= self.end_ms {
+            return 1.0;
+        }
+        if position_ms <= self.at_ms || self.end_ms <= self.at_ms {
+            return 0.0;
+        }
+        (position_ms - self.at_ms) as f32 / (self.end_ms - self.at_ms) as f32
     }
 }
 
@@ -87,6 +157,7 @@ pub fn from_spotify(json: &serde_json::Value) -> Option<Lyrics> {
             Some(Line {
                 at_ms,
                 text: text.to_string(),
+                ..Default::default()
             })
         })
         .collect();
@@ -98,7 +169,207 @@ pub fn from_spotify(json: &serde_json::Value) -> Option<Lyrics> {
         lines,
         synced,
         instrumental: false,
+        rich: false,
     })
+}
+
+/// Parses the Spicy Lyrics API response (`/v1/lyrics/{id}`). The richest
+/// source: `Syllable` carries word-by-word karaoke, `Line` carries one time
+/// per line, `Static` carries none. Times arrive in seconds or milliseconds
+/// depending on the sync source, so the scale is detected from the document.
+pub fn from_spicy(root: &serde_json::Value) -> Option<Lyrics> {
+    let body = root.get("Body").unwrap_or(root);
+    let kind = body
+        .get("Type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let content = body.get("Content").and_then(|value| value.as_array())?;
+
+    // A song is longer than ten seconds, so a largest time under ten thousand
+    // can only be seconds; anything more is already milliseconds.
+    let mut max_time = 0.0_f64;
+    scan_times(body, &mut max_time);
+    let scale = if max_time > 0.0 && max_time < 10_000.0 {
+        1000.0
+    } else {
+        1.0
+    };
+
+    let mut lines = Vec::new();
+    for item in content {
+        let opposite = item
+            .get("OppositeAligned")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        // Some shapes nest the sung line under "Lead"; others put the
+        // syllables straight on the item.
+        let lead = item.get("Lead").unwrap_or(item);
+        let mut syllables = spicy_syllables(lead, scale);
+        // In a line that mixes scripts, only the Japanese syllables carry a
+        // romanization; the English ones are already in Latin letters.
+        if syllables
+            .iter()
+            .any(|syllable| syllable.romanized.is_some())
+        {
+            for syllable in &mut syllables {
+                if syllable.romanized.is_none() {
+                    syllable.romanized = Some(syllable.text.trim().to_string());
+                }
+            }
+        }
+        let background = item
+            .get("Background")
+            .and_then(|value| value.as_array())
+            .map(|array| {
+                array
+                    .iter()
+                    .flat_map(|entry| spicy_syllables(entry, scale))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let (text, at_ms, end_ms) = if syllables.is_empty() {
+            (
+                lead.get("Text")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
+                spicy_ms(lead, "StartTime", scale),
+                spicy_ms(lead, "EndTime", scale),
+            )
+        } else {
+            (
+                join_syllables(&syllables),
+                syllables.first().map(|syllable| syllable.at_ms),
+                syllables.last().map(|syllable| syllable.end_ms),
+            )
+        };
+        if text.is_empty() && syllables.is_empty() {
+            continue;
+        }
+        // The romanized line keeps the spaces between words, which the
+        // syllables of a script such as Japanese do not mark. When only the
+        // syllables carry it, they are joined like the original.
+        let romanized = spicy_text(lead, "TransliteratedText").or_else(|| {
+            let parts: Option<Vec<Syllable>> = syllables
+                .iter()
+                .map(|syllable| {
+                    Some(Syllable {
+                        text: syllable.romanized.clone()?,
+                        ..syllable.clone()
+                    })
+                })
+                .collect();
+            parts
+                .filter(|parts| !parts.is_empty())
+                .map(|parts| join_syllables(&parts))
+        });
+        // A romanization that only repeats the original adds nothing.
+        let romanized = romanized.filter(|romanized| *romanized != text);
+        lines.push(Line {
+            at_ms,
+            text,
+            end_ms,
+            syllables,
+            background,
+            opposite,
+            romanized,
+        });
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    let synced =
+        !kind.eq_ignore_ascii_case("Static") && lines.iter().all(|line| line.at_ms.is_some());
+    let rich = synced
+        && kind.eq_ignore_ascii_case("Syllable")
+        && lines.iter().any(|line| !line.syllables.is_empty());
+    Some(Lyrics {
+        lines,
+        synced,
+        instrumental: false,
+        rich,
+    })
+}
+
+/// Reads a time field and converts it to milliseconds.
+fn spicy_ms(value: &serde_json::Value, key: &str, scale: f64) -> Option<u32> {
+    let seconds = value.get(key).and_then(serde_json::Value::as_f64)?;
+    Some((seconds * scale).round().max(0.0) as u32)
+}
+
+/// Reads the `Syllables` array of a lead or background part.
+fn spicy_syllables(part: &serde_json::Value, scale: f64) -> Vec<Syllable> {
+    let Some(array) = part.get("Syllables").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    array
+        .iter()
+        .filter_map(|entry| {
+            let text = entry
+                .get("Text")
+                .and_then(|value| value.as_str())?
+                .to_string();
+            let at_ms = spicy_ms(entry, "StartTime", scale)?;
+            let end_ms = spicy_ms(entry, "EndTime", scale)
+                .unwrap_or(at_ms)
+                .max(at_ms);
+            let part_of_word = entry
+                .get("IsPartOfWord")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            Some(Syllable {
+                text,
+                at_ms,
+                end_ms,
+                part_of_word,
+                romanized: spicy_text(entry, "TransliteratedText"),
+            })
+        })
+        .collect()
+}
+
+/// A non-empty, trimmed text field.
+fn spicy_text(value: &serde_json::Value, key: &str) -> Option<String> {
+    let text = value.get(key)?.as_str()?.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// Joins syllables into the line's text, with a space between words but not
+/// inside one.
+fn join_syllables(syllables: &[Syllable]) -> String {
+    let mut text = String::new();
+    for (index, syllable) in syllables.iter().enumerate() {
+        text.push_str(&syllable.text);
+        let last = index + 1 == syllables.len();
+        if !last && !syllable.part_of_word {
+            text.push(' ');
+        }
+    }
+    text.trim().to_string()
+}
+
+/// Walks the response for the largest `StartTime`/`EndTime`, to tell seconds
+/// from milliseconds.
+fn scan_times(value: &serde_json::Value, max: &mut f64) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, child) in map {
+                if (key.as_str() == "StartTime" || key.as_str() == "EndTime")
+                    && let Some(time) = child.as_f64()
+                {
+                    *max = max.max(time);
+                }
+                scan_times(child, max);
+            }
+        }
+        serde_json::Value::Array(array) => {
+            for child in array {
+                scan_times(child, max);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The cached answer at `path`, while it is fresh.
@@ -228,6 +499,7 @@ impl Record {
                     lines,
                     synced: true,
                     instrumental: false,
+                    rich: false,
                 });
             }
         }
@@ -238,10 +510,12 @@ impl Record {
                 .map(|line| Line {
                     at_ms: None,
                     text: line.trim_end().to_string(),
+                    ..Default::default()
                 })
                 .collect(),
             synced: false,
             instrumental: false,
+            rich: false,
         })
     }
 }
@@ -536,6 +810,7 @@ pub fn parse_lrc(text: &str) -> Vec<Line> {
             lines.push(Line {
                 at_ms: Some(at_ms),
                 text: body.to_string(),
+                ..Default::default()
             });
         }
     }
@@ -718,6 +993,7 @@ mod tests {
             lines: parse_lrc("[00:05]a\n[00:10]b\n[00:15]c"),
             synced: true,
             instrumental: false,
+            rich: false,
         };
         assert_eq!(lyrics.active_line(0), None);
         assert_eq!(lyrics.active_line(5_000), Some(0));
@@ -727,6 +1003,7 @@ mod tests {
             lines: vec![Line::default()],
             synced: false,
             instrumental: false,
+            rich: false,
         };
         assert_eq!(plain.active_line(5_000), None);
     }
@@ -743,5 +1020,106 @@ mod tests {
         assert_eq!(plain.lines.len(), 1);
         let nothing = Record::default();
         assert!(nothing.lyrics().is_none());
+    }
+
+    #[test]
+    fn spicy_syllables_become_a_karaoke_line() {
+        let json = serde_json::json!({
+            "Status": 200,
+            "Body": {
+                "Type": "Syllable",
+                "Content": [
+                    {
+                        "OppositeAligned": false,
+                        "Lead": {
+                            "Syllables": [
+                                {"Text": "She", "StartTime": 61000, "EndTime": 61200, "IsPartOfWord": true},
+                                {"Text": "'s", "StartTime": 61200, "EndTime": 61400, "IsPartOfWord": false},
+                                {"Text": "into", "StartTime": 61400, "EndTime": 61800}
+                            ]
+                        }
+                    }
+                ]
+            }
+        });
+        let lyrics = from_spicy(&json).expect("parses");
+        assert!(lyrics.rich);
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.lines.len(), 1);
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "She's into");
+        assert_eq!(line.at_ms, Some(61_000));
+        assert_eq!(line.end_ms, Some(61_800));
+        assert_eq!(line.syllables.len(), 3);
+        // The first syllable is fully sung, the last not yet started.
+        assert_eq!(line.syllables[0].progress(61_300), 1.0);
+        assert_eq!(line.syllables[2].progress(61_300), 0.0);
+        // Half way through the last syllable.
+        assert!((line.syllables[2].progress(61_600) - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn spicy_japanese_lines_carry_their_romanization() {
+        let json = serde_json::json!({
+            "Body": {
+                "Type": "Syllable",
+                "Content": [{
+                    "Lead": {
+                        "Syllables": [
+                            {"Text": "無", "TransliteratedText": "mu", "IsPartOfWord": true, "StartTime": 0.742, "EndTime": 0.973},
+                            {"Text": "敵", "TransliteratedText": "teki", "IsPartOfWord": true, "StartTime": 0.973, "EndTime": 1.294},
+                            {"Text": "の", "TransliteratedText": "no", "IsPartOfWord": true, "StartTime": 1.294, "EndTime": 1.476}
+                        ],
+                        "StartTime": 0.742,
+                        "EndTime": 1.476,
+                        "TransliteratedText": "muteki no"
+                    }
+                }]
+            }
+        });
+        let lyrics = from_spicy(&json).expect("parses");
+        assert!(lyrics.has_romanization());
+        let line = &lyrics.lines[0];
+        assert_eq!(line.text, "無敵の");
+        assert_eq!(line.display(false), "無敵の");
+        assert_eq!(line.display(true), "muteki no");
+        assert_eq!(line.syllables[1].romanized.as_deref(), Some("teki"));
+        assert_eq!(line.at_ms, Some(742));
+    }
+
+    #[test]
+    fn spicy_times_in_seconds_scale_to_milliseconds() {
+        let json = serde_json::json!({
+            "Body": {
+                "Type": "Line",
+                "Content": [
+                    {"Lead": {"Text": "First line", "StartTime": 12.5, "EndTime": 15.0}},
+                    {"Lead": {"Text": "Second line", "StartTime": 15.0, "EndTime": 18.0}}
+                ]
+            }
+        });
+        let lyrics = from_spicy(&json).expect("parses");
+        assert!(lyrics.synced);
+        assert!(!lyrics.rich);
+        assert_eq!(lyrics.lines[0].at_ms, Some(12_500));
+        assert_eq!(lyrics.lines[1].at_ms, Some(15_000));
+    }
+
+    #[test]
+    fn spicy_static_lyrics_have_no_timing() {
+        let json = serde_json::json!({
+            "Body": {
+                "Type": "Static",
+                "Content": [
+                    {"Lead": {"Text": "A line"}},
+                    {"Lead": {"Text": "Another line"}}
+                ]
+            }
+        });
+        let lyrics = from_spicy(&json).expect("parses");
+        assert!(!lyrics.synced);
+        assert!(!lyrics.rich);
+        assert_eq!(lyrics.lines.len(), 2);
+        assert_eq!(lyrics.lines[0].at_ms, None);
     }
 }

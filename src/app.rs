@@ -14,7 +14,7 @@ use crate::api::models::{
 };
 use crate::backend::{
     ApiRequest, ApiResponse, AuthStatus, Backend, Command, Event, LocalPlayback, LyricsRequest,
-    PLAYLIST_PAGE_SIZE, PlaylistCacheRows, RecentsFor, RemoteAction, Waker,
+    PLAYLIST_PAGE_SIZE, PlaylistCacheRows, RecentsFor, RemoteAction, SpicyKeyRequest, Waker,
 };
 use crate::i18n::{Locale, gettext, ngettext};
 use crate::model::QueueTab;
@@ -505,6 +505,8 @@ pub struct App {
     /// the first line), so it moves once per change; `None` until it has
     /// positioned itself at all for this track.
     pub lyrics_line_shown: Option<Option<usize>>,
+    /// What is known about the Spicy Lyrics key, for its setup and Settings.
+    pub spicy_key_status: crate::model::SpicyKeyStatus,
     pub show_devices: bool,
     pub toasts: Vec<Toast>,
     pub actions: Vec<Action>,
@@ -1013,6 +1015,7 @@ impl App {
             lyrics: Loadable::NotLoaded,
             lyrics_following: true,
             lyrics_line_shown: None,
+            spicy_key_status: Default::default(),
             show_devices: false,
             toasts: Vec::new(),
             actions: Vec::new(),
@@ -2115,6 +2118,24 @@ impl App {
                     }
                     Err(error) => log::warn!("rootlist unavailable: {error}"),
                 },
+                Event::SpicyKey { status, changed } => {
+                    let saved_and_working = changed
+                        && matches!(
+                            status,
+                            crate::model::SpicyKeyStatus::Working
+                                | crate::model::SpicyKeyStatus::Missing
+                        );
+                    self.spicy_key_status = status;
+                    // A new key, or none, changes which source answers:
+                    // fetch the playing song's words again.
+                    if saved_and_working {
+                        self.lyrics_uri = None;
+                        self.lyrics = Loadable::NotLoaded;
+                        if self.show_lyrics_panel {
+                            self.request_lyrics();
+                        }
+                    }
+                }
                 Event::Lyrics { uri, result } => {
                     if self.lyrics_uri.as_deref() == Some(uri.as_str()) {
                         self.lyrics = match result {
@@ -10260,6 +10281,40 @@ impl App {
                 self.lyrics_line_shown = None;
             }
             Action::PauseLyricsFollow => self.lyrics_following = false,
+            Action::OpenSpicyLyricsSetup => {
+                self.dialog = Some(Dialog::SpicyLyrics {
+                    key: String::new(),
+                    reveal: false,
+                });
+                self.spicy_key_status = crate::model::SpicyKeyStatus::Checking;
+                self.backend
+                    .send(Command::SpicyKey(SpicyKeyRequest::Status));
+            }
+            Action::CheckSpicyKey => {
+                self.spicy_key_status = crate::model::SpicyKeyStatus::Checking;
+                self.backend
+                    .send(Command::SpicyKey(SpicyKeyRequest::Status));
+            }
+            Action::SaveSpicyKey(key) => {
+                self.spicy_key_status = crate::model::SpicyKeyStatus::Checking;
+                if let Some(Dialog::SpicyLyrics { key: field, .. }) = &mut self.dialog {
+                    field.clear();
+                }
+                self.backend
+                    .send(Command::SpicyKey(SpicyKeyRequest::Save(key)));
+            }
+            Action::RemoveSpicyKey => {
+                self.spicy_key_status = crate::model::SpicyKeyStatus::Checking;
+                self.backend
+                    .send(Command::SpicyKey(SpicyKeyRequest::Remove));
+            }
+            Action::ToggleLyricsRomanize => {
+                self.settings.lyrics_romanize = !self.settings.lyrics_romanize;
+                self.settings_dirty = true;
+                // The lines change length, so find the sung line again.
+                self.lyrics_following = true;
+                self.lyrics_line_shown = None;
+            }
             Action::RetryLyrics => self.request_lyrics(),
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
@@ -12311,10 +12366,12 @@ mod tests {
                     .map(|i| crate::lyrics::Line {
                         at_ms: Some(i * 5000),
                         text: format!("Autoscroll lyric line {i}"),
+                        ..Default::default()
                     })
                     .collect(),
                 synced: true,
                 instrumental: false,
+                rich: false,
             }));
             if let Some(remote) = &mut app.remote {
                 remote.state.is_playing = false;

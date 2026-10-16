@@ -1923,6 +1923,68 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         });
     }
 
+    let spicy_title = "Spicy Lyrics";
+    let spicy_karaoke = gettext(locale, "Word-by-word lyrics");
+    let spicy_karaoke_detail = gettext(
+        locale,
+        "Karaoke lyrics from the free Spicy Lyrics service, with your own key.",
+    );
+    let spicy_romaji = gettext(locale, "Romaji for Japanese lyrics");
+    let spicy_romaji_detail = gettext(
+        locale,
+        "Show Japanese lyrics in Latin letters. The Romaji button in the lyrics header does the same.",
+    );
+    let spicy_rows = [
+        RowText::new(spicy_karaoke.clone(), spicy_karaoke_detail.clone()),
+        RowText::new(spicy_romaji.clone(), spicy_romaji_detail.clone()),
+    ];
+    if section_matches(&needle, spicy_title, &spicy_rows) {
+        any_visible = true;
+        // Learn whether a key is set the first time the section shows.
+        if app.spicy_key_status == crate::model::SpicyKeyStatus::Unknown {
+            app.actions.push(Action::CheckSpicyKey);
+        }
+        section(ui, &palette, spicy_title, |ui| {
+            if spicy_rows[0].matches(&needle, spicy_title) {
+                widgets::setting_row_sized(
+                    ui,
+                    &palette,
+                    &spicy_karaoke,
+                    &spicy_karaoke_detail,
+                    130.0,
+                    |ui| {
+                        let has_key = matches!(
+                            app.spicy_key_status,
+                            crate::model::SpicyKeyStatus::Working
+                                | crate::model::SpicyKeyStatus::FromEnvironment
+                                | crate::model::SpicyKeyStatus::Rejected
+                                | crate::model::SpicyKeyStatus::Unchecked(_)
+                        );
+                        let label = if has_key {
+                            gettext(locale, "Change key")
+                        } else {
+                            gettext(locale, "Set up")
+                        };
+                        if theme::soft_button(ui, &palette, Some(Icon::Sparkles), &label, false)
+                            .clicked()
+                        {
+                            app.actions.push(Action::OpenSpicyLyricsSetup);
+                        }
+                    },
+                );
+                ui.add_space(2.0);
+                super::dialogs::spicy_status(ui, &palette, locale, &app.spicy_key_status);
+                ui.add_space(6.0);
+            }
+            filtered_row(ui, &palette, &needle, spicy_title, &spicy_rows[1], |ui| {
+                let mut romanize = app.settings.lyrics_romanize;
+                if widgets::switch(ui, &palette, &spicy_romaji, &mut romanize).changed() {
+                    app.actions.push(Action::ToggleLyricsRomanize);
+                }
+            });
+        });
+    }
+
     let about = gettext(locale, "About");
     let built_with = gettext(
         locale,

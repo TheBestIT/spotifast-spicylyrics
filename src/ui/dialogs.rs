@@ -55,6 +55,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         }
                     });
                 }
+                Dialog::SpicyLyrics { .. } => spicy_lyrics(app, ui),
                 Dialog::CreatePlaylist { .. } => create_playlist(app, ui),
                 Dialog::EditPlaylist { .. } => edit_playlist(app, ui),
                 Dialog::ConfirmDeletePlaylist { id, name, owned } => {
@@ -340,6 +341,288 @@ fn text_field(
         response.request_focus();
     }
     response
+}
+
+/// Where a Spicy Lyrics key is made.
+pub const SPICY_DASHBOARD_URL: &str = "https://developers.spicylyrics.org/dashboard/applications";
+/// How Spicy Lyrics keys work, native apps included.
+pub const SPICY_KEYS_URL: &str = "https://developers.spicylyrics.org/docs/keys";
+/// The terms a key holder accepts.
+pub const SPICY_TERMS_URL: &str = "https://developers.spicylyrics.org/terms";
+
+/// A short line about the key's state, with an icon in a matching colour.
+pub fn spicy_status(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    locale: Locale,
+    status: &crate::model::SpicyKeyStatus,
+) {
+    use crate::model::SpicyKeyStatus;
+    let (icon, color, text) = match status {
+        SpicyKeyStatus::Unknown | SpicyKeyStatus::Checking => {
+            (None, palette.secondary, gettext(locale, "Checking the key…").to_string())
+        }
+        SpicyKeyStatus::Missing => (
+            Some(theme::Icon::Info),
+            palette.secondary,
+            gettext(locale, "No key yet. Lyrics come from Spotify and LRCLIB, line by line.")
+                .to_string(),
+        ),
+        SpicyKeyStatus::Working => (
+            Some(theme::Icon::CircleCheck),
+            palette.accent,
+            gettext(locale, "The key works. Lyrics light up word by word.").to_string(),
+        ),
+        SpicyKeyStatus::FromEnvironment => (
+            Some(theme::Icon::CircleCheck),
+            palette.accent,
+            gettext(
+                locale,
+                "The key from the SPICY_LYRICS_KEY environment variable works. It wins over a saved key.",
+            )
+            .to_string(),
+        ),
+        SpicyKeyStatus::Rejected => (
+            Some(theme::Icon::CircleX),
+            palette.danger,
+            gettext(
+                locale,
+                "Spicy Lyrics refused the key. Check that you copied the whole secret key and that “No origin header” is on.",
+            )
+            .to_string(),
+        ),
+        SpicyKeyStatus::Unchecked(reason) => (
+            Some(theme::Icon::CircleAlert),
+            palette.warning,
+            // Translators: {error} is the original failure detail.
+            gettext(locale, "Couldn't check the key: {error}").replace("{error}", reason),
+        ),
+    };
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        match icon {
+            Some(icon) => {
+                theme::icon(ui, icon, 16.0, color);
+            }
+            None => {
+                theme::spinner(ui, 16.0, color);
+            }
+        }
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::regular(13.5))
+                    .color(color),
+            )
+            .wrap(),
+        );
+    });
+}
+
+/// Setup for the Spicy Lyrics key: what it is for, how to get one, the field
+/// to paste it in, and where it goes.
+fn spicy_lyrics(app: &mut App, ui: &mut egui::Ui) {
+    use crate::model::SpicyKeyStatus;
+    let palette = app.palette;
+    let locale = app.locale;
+    let status = app.spicy_key_status.clone();
+    let Some(Dialog::SpicyLyrics { key, reveal }) = &mut app.dialog else {
+        return;
+    };
+    ui.set_width(480.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        theme::icon(ui, theme::Icon::Sparkles, 22.0, palette.accent);
+        theme::text(ui, "Spicy Lyrics", theme::bold(20.0), palette.text);
+    });
+    ui.add_space(6.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(gettext(
+                locale,
+                "Word-by-word karaoke lyrics, with romaji for Japanese songs, from the free Spicy Lyrics service. It needs your own key, which takes two minutes to make.",
+            ))
+            .font(theme::regular(14.0))
+            .color(palette.secondary),
+        )
+        .wrap(),
+    );
+    ui.add_space(12.0);
+    spicy_status(ui, &palette, locale, &status);
+    ui.add_space(14.0);
+
+    theme::text(
+        ui,
+        gettext(locale, "Get a free key"),
+        theme::semibold(14.0),
+        palette.text,
+    );
+    ui.add_space(6.0);
+    let steps = [
+        gettext(
+            locale,
+            "Open the Spicy Lyrics developer dashboard and sign in.",
+        )
+        .to_string(),
+        gettext(locale, "Create an application.").to_string(),
+        gettext(
+            locale,
+            "In the application's key settings, turn on “No origin header”. Desktop apps need it.",
+        )
+        .to_string(),
+        gettext(locale, "Copy the secret key. It starts with sl_sk_.").to_string(),
+        gettext(locale, "Paste it below and choose Save.").to_string(),
+    ];
+    for (number, step) in steps.iter().enumerate() {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (badge, _) = ui.allocate_exact_size(egui::vec2(20.0, 20.0), egui::Sense::hover());
+            ui.painter()
+                .circle_filled(badge.center(), 10.0, palette.surface_active);
+            ui.painter().text(
+                badge.center(),
+                egui::Align2::CENTER_CENTER,
+                (number + 1).to_string(),
+                theme::semibold(11.5),
+                palette.text,
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(step)
+                        .font(theme::regular(13.5))
+                        .color(palette.text),
+                )
+                .wrap(),
+            );
+        });
+        ui.add_space(4.0);
+    }
+    ui.add_space(6.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(theme::Icon::ExternalLink),
+            &gettext(locale, "Open the dashboard"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions
+                .push(Action::OpenUrl(SPICY_DASHBOARD_URL.to_owned()));
+        }
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(theme::Icon::ExternalLink),
+            &gettext(locale, "How keys work"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::OpenUrl(SPICY_KEYS_URL.to_owned()));
+        }
+    });
+    ui.add_space(14.0);
+
+    theme::text(
+        ui,
+        gettext(locale, "Secret key"),
+        theme::medium(13.0),
+        palette.secondary,
+    );
+    ui.add_space(2.0);
+    let field = ui
+        .horizontal(|ui| {
+            let field = Frame::new()
+                .fill(palette.surface)
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width() - 70.0);
+                    super::widgets::text_edit(
+                        ui,
+                        locale,
+                        egui::TextEdit::singleline(key)
+                            .id(egui::Id::new("spicy-lyrics-key"))
+                            .password(!*reveal)
+                            .hint_text(egui::RichText::new("sl_sk_…").color(palette.dim))
+                            .font(theme::regular(14.0))
+                            .frame(egui::Frame::NONE)
+                            .desired_width(f32::INFINITY),
+                    )
+                })
+                .inner;
+            let label = if *reveal {
+                gettext(locale, "Hide")
+            } else {
+                gettext(locale, "Show")
+            };
+            if theme::link(
+                ui,
+                label.to_string(),
+                theme::medium(13.0),
+                palette.secondary,
+            )
+            .clicked()
+            {
+                *reveal = !*reveal;
+            }
+            field
+        })
+        .inner;
+    ui.add_space(8.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(gettext(
+                locale,
+                "The key stays on this computer, in Spotifast's config folder. Spotifast sends it only to api.spicylyrics.org, with the Spotify ID of the song you open the lyrics for. Spicy Lyrics is a separate service with its own terms.",
+            ))
+            .font(theme::regular(12.5))
+            .color(palette.dim),
+        )
+        .wrap(),
+    );
+    if theme::link(
+        ui,
+        gettext(locale, "Spicy Lyrics terms").to_string(),
+        theme::regular(12.5),
+        palette.secondary,
+    )
+    .clicked()
+    {
+        app.actions
+            .push(Action::OpenUrl(SPICY_TERMS_URL.to_owned()));
+    }
+    ui.add_space(18.0);
+
+    let typed = key.trim().to_string();
+    let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let checking = status == SpicyKeyStatus::Checking;
+    let stored = matches!(
+        status,
+        SpicyKeyStatus::Working | SpicyKeyStatus::Rejected | SpicyKeyStatus::Unchecked(_)
+    );
+    buttons(ui, |ui| {
+        if checking {
+            theme::spinner(ui, 18.0, palette.accent);
+        } else if (theme::pill_button(ui, &palette, &gettext(locale, "Save"), true).clicked()
+            || submit)
+            && !typed.is_empty()
+        {
+            app.actions.push(Action::SaveSpicyKey(typed.clone()));
+        }
+        if theme::pill_button(ui, &palette, &gettext(locale, "Close"), false).clicked() {
+            app.actions.push(Action::CloseDialog);
+        }
+        if stored
+            && !checking
+            && theme::pill_button(ui, &palette, &gettext(locale, "Remove key"), false).clicked()
+        {
+            app.actions.push(Action::RemoveSpicyKey);
+        }
+    });
 }
 
 fn create_playlist(app: &mut App, ui: &mut egui::Ui) {

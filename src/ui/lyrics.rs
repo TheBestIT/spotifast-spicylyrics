@@ -2,8 +2,14 @@
 
 use egui::{Align, Color32, Frame, Layout, Margin, Rect, Sense, UiBuilder, pos2, vec2};
 
+use std::borrow::Cow;
+use std::sync::Arc;
+
+use egui::text::CCursor;
+
 use crate::app::App;
 use crate::i18n::{gettext, pgettext};
+use crate::lyrics::{Lyrics, Syllable};
 use crate::model::{Action, Loadable};
 use crate::theme::{self, Icon};
 
@@ -31,6 +37,241 @@ const LIGHT_UP_SECONDS: f32 = 0.22;
 fn blend(from: egui::Color32, to: egui::Color32, t: f32) -> egui::Color32 {
     let t = t.clamp(0.0, 1.0);
     egui::Color32::from(egui::Rgba::from(from) * (1.0 - t) + egui::Rgba::from(to) * t)
+}
+
+/// Whether any piece is in the middle of being sung, so the view must keep
+/// repainting for the fill to move.
+fn is_filling(pieces: &[Syllable], position_ms: u32) -> bool {
+    pieces
+        .iter()
+        .any(|piece| position_ms >= piece.at_ms && position_ms < piece.end_ms)
+}
+
+/// The timed pieces that line `index` fills through. A karaoke source gives
+/// one per syllable. A line-synced source gives only the line's start (and
+/// sometimes its end), so the line's time is split between its words by
+/// their length, and the line still fills word by word, as in Spicy Lyrics.
+/// With `romanize`, the pieces are the romanized syllables, or the romanized
+/// words when only the line has a romanization.
+fn timed_pieces(lyrics: &Lyrics, index: usize, romanize: bool) -> Option<Cow<'_, [Syllable]>> {
+    let line = lyrics.lines.get(index)?;
+    let romanized = romanize && line.romanized.is_some();
+    if !line.syllables.is_empty() {
+        if !romanized {
+            return Some(Cow::Borrowed(line.syllables.as_slice()));
+        }
+        let pieces: Option<Vec<Syllable>> = line
+            .syllables
+            .iter()
+            .map(|syllable| {
+                Some(Syllable {
+                    text: syllable.romanized.clone()?,
+                    ..syllable.clone()
+                })
+            })
+            .collect();
+        if let Some(pieces) = pieces {
+            return Some(Cow::Owned(pieces));
+        }
+        // Some syllables lack a romanization: split the romanized line's
+        // time between its words instead.
+    }
+    if !lyrics.synced {
+        return None;
+    }
+    let start = line.at_ms?;
+    let words: Vec<&str> = line.display(romanize).split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+    let chars: u32 = words.iter().map(|word| word.chars().count() as u32).sum();
+    let end = match line.end_ms {
+        Some(end) => end,
+        // Without an end, the next line's start may sit after a long
+        // instrumental break, so the fill stops at a natural singing pace.
+        None => {
+            let next = lyrics
+                .lines
+                .get(index + 1)
+                .and_then(|next| next.at_ms)
+                .unwrap_or(u32::MAX);
+            next.min(start.saturating_add((chars * 90).max(1_200)))
+        }
+    };
+    if end <= start {
+        return None;
+    }
+    // Each word weighs its letters plus one, so short words still get time.
+    let weights: Vec<u64> = words
+        .iter()
+        .map(|word| word.chars().count() as u64 + 1)
+        .collect();
+    let total: u64 = weights.iter().sum();
+    let span = u64::from(end - start);
+    let mut done = 0_u64;
+    let mut at = start;
+    let pieces = words
+        .iter()
+        .zip(weights)
+        .map(|(word, weight)| {
+            done += weight;
+            let until = start + (span * done / total) as u32;
+            let piece = Syllable {
+                text: (*word).to_string(),
+                at_ms: at,
+                end_ms: until,
+                ..Default::default()
+            };
+            at = until;
+            piece
+        })
+        .collect();
+    Some(Cow::Owned(pieces))
+}
+
+/// How far into `text` the song is, in characters, with a fraction for the
+/// character being sung. Each timed piece is found in the text in order, so
+/// the position follows the same words the line shows.
+fn sung_chars(text: &str, pieces: &[Syllable], position_ms: u32) -> f32 {
+    let mut search = 0;
+    let mut sung = 0.0;
+    for piece in pieces {
+        let word = piece.text.trim();
+        let Some(found) = text[search..].find(word) else {
+            break;
+        };
+        let start = search + found;
+        let end = start + word.len();
+        let progress = piece.progress(position_ms);
+        if progress > 0.0 {
+            let before = text[..start].chars().count() as f32;
+            let length = text[start..end].chars().count() as f32;
+            sung = before + progress * length;
+        }
+        if progress < 1.0 {
+            break;
+        }
+        search = end;
+    }
+    sung
+}
+
+/// Draws the active line as one laid-out galley, so it wraps and measures
+/// exactly as it does when it is not active, then lights its text up to where
+/// the song is: the rows already sung in full, the current row up to the sung
+/// character, and a soft edge after it. `galley` is laid out in `base`.
+#[allow(clippy::too_many_arguments)]
+fn karaoke_label(
+    ui: &mut egui::Ui,
+    galley: Arc<egui::Galley>,
+    pieces: &[Syllable],
+    position_ms: u32,
+    base: Color32,
+    sung: Color32,
+    feather: f32,
+    sense: Sense,
+) -> egui::Response {
+    let response = ui.add(egui::Label::new(galley.clone()).sense(sense));
+    let chars = sung_chars(&galley.job.text, pieces, position_ms);
+    if chars <= 0.0 {
+        return response;
+    }
+    // The label places the galley so that its own rectangle lands on the
+    // response; cursor positions are relative to the galley's origin.
+    let origin = response.rect.min - galley.rect.min.to_vec2();
+    let painter = ui.painter();
+    let total = galley.job.text.chars().count();
+    let whole = chars.floor() as usize;
+    if whole >= total {
+        painter.galley_with_override_text_color(origin, galley, sung);
+        return response;
+    }
+    let here = galley.pos_from_cursor(CCursor::new(whole));
+    let next = galley.pos_from_cursor(CCursor::new(whole + 1));
+    let width = if (next.min.y - here.min.y).abs() < 0.5 {
+        next.min.x - here.min.x
+    } else {
+        feather
+    };
+    let edge = origin.x + here.min.x + width * chars.fract();
+    let top = origin.y + here.min.y;
+    let bottom = origin.y + here.max.y;
+    let right = origin.x + galley.rect.max.x;
+    // The rows above the one being sung are sung in full.
+    if top > origin.y + galley.rect.min.y + 0.5 {
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                pos2(origin.x + galley.rect.min.x, origin.y + galley.rect.min.y),
+                pos2(right, top),
+            ))
+            .galley_with_override_text_color(origin, galley.clone(), sung);
+    }
+    painter
+        .with_clip_rect(Rect::from_min_max(
+            pos2(origin.x + galley.rect.min.x, top),
+            pos2(edge, bottom),
+        ))
+        .galley_with_override_text_color(origin, galley.clone(), sung);
+    // The fill ends in a soft edge: thin slices that fade from the sung
+    // colour back to the quiet one, instead of a hard cut through a letter.
+    const SLICES: usize = 6;
+    let step = feather / SLICES as f32;
+    for slice in 0..SLICES {
+        let left = edge + step * slice as f32;
+        let strength = 1.0 - (slice as f32 + 0.5) / SLICES as f32;
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                pos2(left, top),
+                pos2((left + step).min(right), bottom),
+            ))
+            .galley_with_override_text_color(origin, galley.clone(), blend(base, sung, strength));
+    }
+    response
+}
+
+/// Opens the Spicy Lyrics key setup. Accented while no key works yet, as a
+/// quiet invitation.
+fn spicy_button(app: &mut App, ui: &mut egui::Ui, palette: &theme::Palette, idle: Color32) {
+    use crate::model::SpicyKeyStatus;
+    if app.spicy_key_status == SpicyKeyStatus::Unknown {
+        app.actions.push(Action::CheckSpicyKey);
+    }
+    let invite = matches!(
+        app.spicy_key_status,
+        SpicyKeyStatus::Missing | SpicyKeyStatus::Rejected
+    );
+    let color = if invite { palette.accent } else { idle };
+    if theme::icon_button(
+        ui,
+        Icon::Sparkles,
+        18.0,
+        color,
+        palette.text,
+        &gettext(app.locale, "Spicy Lyrics: word-by-word lyrics"),
+    )
+    .clicked()
+    {
+        app.actions.push(Action::OpenSpicyLyricsSetup);
+    }
+}
+
+/// The Romaji switch, shown only while the lyrics have a romanization. It is
+/// filled in the accent colour while the romanized text is shown.
+fn romanize_button(app: &mut App, ui: &mut egui::Ui, palette: &theme::Palette) {
+    let offered =
+        matches!(&app.lyrics, Loadable::Loaded(Some(lyrics)) if lyrics.has_romanization());
+    if offered
+        && theme::pill_button(
+            ui,
+            palette,
+            &pgettext(app.locale, "lyrics", "Romaji"),
+            app.settings.lyrics_romanize,
+        )
+        .on_hover_text(gettext(app.locale, "Show the lyrics in Latin letters"))
+        .clicked()
+    {
+        app.actions.push(Action::ToggleLyricsRomanize);
+    }
 }
 
 pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
@@ -93,6 +334,8 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
                 {
                     app.actions.push(Action::SetLyricsFullscreen(true));
                 }
+                spicy_button(app, ui, &palette, palette.secondary);
+                romanize_button(app, ui, &palette);
                 let loaded = matches!(&app.lyrics, Loadable::Loaded(Some(_)));
                 if loaded
                     && !app.lyrics_following
@@ -204,6 +447,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
     };
 
     let active = lyrics.active_line(now.position_ms);
+    let romanize = app.settings.lyrics_romanize;
     let follow = app.lyrics_following && app.lyrics_line_shown != Some(active);
     // The line being sung is bold and in the accent colour; every other
     // line is quiet, regular text, the same before and after it has been
@@ -243,14 +487,38 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                 let text = if line.text.is_empty() && lyrics.synced {
                     "\u{266a}"
                 } else {
-                    line.text.as_str()
+                    line.display(romanize)
                 };
                 let sense = if lyrics.synced {
                     Sense::click()
                 } else {
                     Sense::hover()
                 };
-                let response = if crate::bidi::is_rtl(text) {
+                // The active line lights up word by word; every other line
+                // keeps the quiet, line-level look.
+                let pieces = if is_active && !crate::bidi::is_rtl(text) {
+                    timed_pieces(&lyrics, index, romanize)
+                } else {
+                    None
+                };
+                let response = if let Some(pieces) = &pieces {
+                    let galley = ui.painter().layout(
+                        text.to_string(),
+                        theme::bold(LINE_SIZE),
+                        quiet,
+                        ui.available_width(),
+                    );
+                    karaoke_label(
+                        ui,
+                        galley,
+                        pieces,
+                        now.position_ms,
+                        quiet,
+                        palette.accent,
+                        LINE_SIZE * 0.6,
+                        sense,
+                    )
+                } else if crate::bidi::is_rtl(text) {
                     let galley = crate::bidi::layout(
                         ui.painter(),
                         text,
@@ -277,7 +545,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                     app.lyrics_following = true;
                 }
                 if is_active && follow {
-                    show_sung_line(ui, rect, None);
+                    show_sung_line(ui, rect, Some(crate::motion::scroll(ui.ctx(), 0.45)));
                 }
                 ui.add_space(LINE_GAP);
             }
@@ -301,6 +569,16 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
         },
     );
     crate::autoscroll::lyrics(ui, scroll.id);
+    // The word-by-word fill moves between frames, so keep painting while a
+    // word is in progress.
+    if now.playing
+        && active.is_some_and(|index| {
+            timed_pieces(&lyrics, index, romanize)
+                .is_some_and(|pieces| is_filling(&pieces, now.position_ms))
+        })
+    {
+        ui.ctx().request_repaint();
+    }
     // Scrolling by hand means the reader wants to look elsewhere; the
     // Follow button in the header picks the song back up.
     if ui.rect_contains_pointer(scroll.inner_rect)
@@ -563,6 +841,8 @@ fn fullscreen_header(app: &mut App, ui: &mut egui::Ui) {
             {
                 app.actions.push(Action::SetLyricsFullscreen(false));
             }
+            spicy_button(app, ui, &palette, palette.text);
+            romanize_button(app, ui, &palette);
             let loaded = matches!(&app.lyrics, Loadable::Loaded(Some(_)));
             if loaded
                 && !app.lyrics_following
@@ -673,6 +953,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
     };
 
     let active = lyrics.active_line(now.position_ms);
+    let romanize = app.settings.lyrics_romanize;
     // A Follow click resets the remembered line after drawing. Other frames
     // record the shown line before any line-click action restores following.
     if !app
@@ -739,7 +1020,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 let text = if line.text.is_empty() && lyrics.synced {
                     "\u{266a}"
                 } else {
-                    line.text.as_str()
+                    line.display(romanize)
                 };
                 let sense = if lyrics.synced {
                     Sense::click()
@@ -759,10 +1040,40 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 let edge = ((center - viewport.top()).min(viewport.bottom() - center)
                     / (size * 2.0))
                     .clamp(0.0, 1.0);
+                // The active line fills word by word.
+                let pieces = if is_active && lyrics.synced && !crate::bidi::is_rtl(text) {
+                    timed_pieces(&lyrics, index, romanize)
+                } else {
+                    None
+                };
                 let response = ui
                     .scope(|ui| {
                         ui.multiply_opacity(edge * edge * (3.0 - 2.0 * edge));
-                        ui.add(egui::Label::new(galley).sense(sense))
+                        if let Some(pieces) = &pieces {
+                            // The same layout as the line's own galley, in the
+                            // quiet colour, so the line does not move or rewrap.
+                            let quiet_galley = crate::bidi::layout(
+                                ui.painter(),
+                                text,
+                                theme::bold(size),
+                                quiet,
+                                ui.available_width(),
+                                usize::MAX,
+                                None,
+                            );
+                            karaoke_label(
+                                ui,
+                                quiet_galley,
+                                pieces,
+                                now.position_ms,
+                                quiet,
+                                palette.text,
+                                size * 0.6,
+                                sense,
+                            )
+                        } else {
+                            ui.add(egui::Label::new(galley).sense(sense))
+                        }
                     })
                     .inner;
                 let rect = response.rect;
@@ -801,7 +1112,16 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
     if manual_scroll && app.lyrics_following {
         app.actions.push(Action::PauseLyricsFollow);
     }
+    // The active line fills continuously, so repaint every frame while a word
+    // is in progress; otherwise wake just in time for the next line.
     if now.playing
+        && active.is_some_and(|index| {
+            timed_pieces(&lyrics, index, romanize)
+                .is_some_and(|pieces| is_filling(&pieces, now.position_ms))
+        })
+    {
+        ui.ctx().request_repaint();
+    } else if now.playing
         && lyrics.synced
         && let Some(next) = lyrics
             .lines
@@ -818,7 +1138,102 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::{fullscreen_content_width, preferred_backdrop_art};
+    use super::{fullscreen_content_width, preferred_backdrop_art, sung_chars, timed_pieces};
+    use crate::lyrics::{Line, Lyrics, Syllable};
+
+    #[test]
+    fn the_sung_position_moves_through_the_text_word_by_word() {
+        let piece = |text: &str, at_ms, end_ms| Syllable {
+            text: text.into(),
+            at_ms,
+            end_ms,
+            ..Default::default()
+        };
+        let pieces = [piece("She's", 0, 1_000), piece("into", 1_000, 2_000)];
+        let text = "She's into";
+        assert_eq!(sung_chars(text, &pieces, 0), 0.0);
+        // Half of "She's" is five characters, half sung.
+        assert!((sung_chars(text, &pieces, 500) - 2.5).abs() < 0.01);
+        // "She's" sung, the space skipped, half of "into".
+        assert!((sung_chars(text, &pieces, 1_500) - 8.0).abs() < 0.01);
+        assert_eq!(sung_chars(text, &pieces, 9_000), 10.0);
+    }
+
+    #[test]
+    fn romanized_syllables_fill_through_the_romanized_line() {
+        let syllable = |text: &str, romaji: &str, at_ms, end_ms| Syllable {
+            text: text.into(),
+            at_ms,
+            end_ms,
+            part_of_word: true,
+            romanized: Some(romaji.into()),
+        };
+        let lyrics = Lyrics {
+            lines: vec![Line {
+                at_ms: Some(0),
+                text: "無敵の".into(),
+                end_ms: Some(3_000),
+                syllables: vec![
+                    syllable("無", "mu", 0, 1_000),
+                    syllable("敵", "teki", 1_000, 2_000),
+                    syllable("の", "no", 2_000, 3_000),
+                ],
+                romanized: Some("muteki no".into()),
+                ..Default::default()
+            }],
+            synced: true,
+            instrumental: false,
+            rich: true,
+        };
+        let original = timed_pieces(&lyrics, 0, false).unwrap();
+        assert_eq!(original[1].text, "敵");
+        let romaji = timed_pieces(&lyrics, 0, true).unwrap();
+        assert_eq!(romaji[1].text, "teki");
+        let text = lyrics.lines[0].display(true);
+        assert_eq!(text, "muteki no");
+        // "mu" and "teki" sung, half of "no": the space is skipped.
+        assert!((sung_chars(text, &romaji, 2_500) - 8.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_line_synced_line_is_split_into_words_that_fill_in_turn() {
+        let lyrics = Lyrics {
+            lines: vec![
+                Line {
+                    at_ms: Some(10_000),
+                    text: "She's into superstitions".into(),
+                    end_ms: Some(12_000),
+                    ..Default::default()
+                },
+                Line {
+                    at_ms: Some(13_000),
+                    text: "Black cats".into(),
+                    ..Default::default()
+                },
+            ],
+            synced: true,
+            instrumental: false,
+            rich: false,
+        };
+        let pieces = timed_pieces(&lyrics, 0, false).expect("a timed line fills");
+        assert_eq!(pieces.len(), 3);
+        assert_eq!(pieces[0].at_ms, 10_000);
+        assert_eq!(pieces[2].end_ms, 12_000);
+        // The words follow one another without gaps.
+        assert_eq!(pieces[0].end_ms, pieces[1].at_ms);
+        assert_eq!(pieces[1].end_ms, pieces[2].at_ms);
+        // The longest word gets the most time.
+        assert!(pieces[2].end_ms - pieces[2].at_ms > pieces[0].end_ms - pieces[0].at_ms);
+        // Without an end, the last line stops at a singing pace.
+        let last = timed_pieces(&lyrics, 1, false).expect("fills");
+        assert!(last.last().unwrap().end_ms <= 13_000 + 1_200);
+        // Plain lyrics carry no time to fill through.
+        let plain = Lyrics {
+            synced: false,
+            ..lyrics.clone()
+        };
+        assert!(timed_pieces(&plain, 0, false).is_none());
+    }
 
     #[test]
     fn fullscreen_backdrop_prefers_small_art_with_large_art_as_fallback() {

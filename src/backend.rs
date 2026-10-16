@@ -725,6 +725,8 @@ pub enum Command {
     },
     /// The words of a track, from LRCLIB.
     Lyrics(Box<LyricsRequest>),
+    /// Check, store or forget the Spicy Lyrics key.
+    SpicyKey(SpicyKeyRequest),
     /// The account's playlist tree, folders and all, from the session.
     Rootlist,
     /// Internal: a rootlist read completed for this signed-in session.
@@ -832,6 +834,16 @@ pub struct LyricsRequest {
     pub query: crate::lyrics::Query,
 }
 
+/// What to do with the Spicy Lyrics key.
+pub enum SpicyKeyRequest {
+    /// Report whether a key is set and whether Spicy Lyrics accepts it.
+    Status,
+    /// Store this key in the config folder, then check it.
+    Save(String),
+    /// Delete the stored key.
+    Remove,
+}
+
 pub enum Event {
     ProxyRestored {
         config: ProxyConfig,
@@ -886,6 +898,12 @@ pub enum Event {
     Lyrics {
         uri: String,
         result: Result<Option<crate::lyrics::Lyrics>, String>,
+    },
+    /// The state of the Spicy Lyrics key. `changed` is true after a save or a
+    /// removal, so the lyrics are fetched again.
+    SpicyKey {
+        status: crate::model::SpicyKeyStatus,
+        changed: bool,
     },
     /// The account's playlist tree, folders and all, and which of its
     /// playlists take songs from this account.
@@ -2262,6 +2280,7 @@ impl Worker {
                     });
                 }
                 Command::Lyrics(request) => self.fetch_lyrics(*request),
+                Command::SpicyKey(request) => self.handle_spicy_key(request),
                 Command::Rootlist => self.fetch_rootlist(),
                 Command::RootlistFinished { generation, result } => {
                     self.on_rootlist_finished(generation, result);
@@ -4011,24 +4030,90 @@ impl Worker {
         self.start_album_type_lookup();
     }
 
+    /// Checks, stores or forgets the Spicy Lyrics key on the runtime, so the
+    /// file and the network never wait on the UI thread.
+    fn handle_spicy_key(&self, request: SpicyKeyRequest) {
+        let http = self.http.client();
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        let path = self.dirs.config.join(SPICY_KEY_FILE);
+        tokio::spawn(async move {
+            let changed = !matches!(request, SpicyKeyRequest::Status);
+            let stored = match request {
+                SpicyKeyRequest::Status => Ok(()),
+                SpicyKeyRequest::Save(key) => store_spicy_key(&path, key.trim()).await,
+                SpicyKeyRequest::Remove => match tokio::fs::remove_file(&path).await {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                        Err(format!("cannot delete the key file: {error}"))
+                    }
+                    _ => Ok(()),
+                },
+            };
+            let status = match stored {
+                Err(error) => crate::model::SpicyKeyStatus::Unchecked(error),
+                Ok(()) => {
+                    let config_dir = path.parent().map(std::path::Path::to_path_buf);
+                    let from_env = spicy_env_key();
+                    let key = from_env
+                        .clone()
+                        .or_else(|| config_dir.as_deref().and_then(spicy_key));
+                    match (key, http) {
+                        (None, _) => crate::model::SpicyKeyStatus::Missing,
+                        (Some(_), Err(error)) => crate::model::SpicyKeyStatus::Unchecked(error),
+                        (Some(key), Ok(http)) => match check_spicy_key(&http, &key).await {
+                            crate::model::SpicyKeyStatus::Working if from_env.is_some() => {
+                                crate::model::SpicyKeyStatus::FromEnvironment
+                            }
+                            status => status,
+                        },
+                    }
+                }
+            };
+            let _ = events.send(Event::SpicyKey { status, changed });
+            waker.wake();
+        });
+    }
+
     fn fetch_lyrics(&self, request: LyricsRequest) {
         let http = self.http.client();
+        let key = spicy_key(&self.dirs.config);
         let events = self.events.clone();
         let waker = self.waker.clone();
         let cache_dir = self.dirs.lyrics_cache_dir();
         let engine = self.engine.clone();
         tokio::spawn(async move {
-            // Spotify's own words go first: they follow the recording
-            // exactly. Everything else, a signed-out session included,
-            // falls back to LRCLIB.
-            let result = match spotify_lyrics(engine, &request.uri, &cache_dir).await {
-                Some(found) => Ok(Some(found)),
-                None => match http {
-                    Ok(http) => crate::lyrics::fetch(&http, &cache_dir, &request.query)
-                        .await
-                        .map_err(|error| format!("{error:#}")),
-                    Err(error) => Err(error),
-                },
+            // Spicy Lyrics has the word-by-word karaoke, so it goes first when
+            // the listener supplied a key. Spotify's own transcription follows
+            // (it matches the recording exactly), then LRCLIB, which a
+            // signed-out session can still reach.
+            let spicy = match (&http, &key) {
+                (Ok(http), Some(key)) => spicy_lyrics(http, key, &request.uri, &cache_dir).await,
+                _ => None,
+            };
+            let result = if let Some(found) = spicy {
+                Ok(Some(found))
+            } else {
+                match spotify_lyrics(engine, &request.uri, &cache_dir).await {
+                    Some(found) => Ok(Some(found)),
+                    None => match http {
+                        Ok(http) => crate::lyrics::fetch(&http, &cache_dir, &request.query)
+                            .await
+                            .map_err(|error| format!("{error:#}")),
+                        Err(error) => Err(error),
+                    },
+                }
+            };
+            // Japanese words without a romanization get one here. The
+            // dictionary lookup is CPU work, so it runs off the async workers.
+            let result = match result {
+                Ok(Some(mut lyrics)) => tokio::task::spawn_blocking(move || {
+                    crate::romaji::fill(&mut lyrics);
+                    lyrics
+                })
+                .await
+                .map(Some)
+                .map_err(|error| format!("{error}")),
+                other => other,
             };
             let _ = events.send(Event::Lyrics {
                 uri: request.uri,
@@ -5183,6 +5268,142 @@ fn settle<T>(result: Result<T, session_reads::Failure>) -> Option<ApiResult<T>> 
             None
         }
     }
+}
+
+/// Where Spicy Lyrics serves a track's words, by Spotify track id.
+const SPICY_API: &str = "https://api.spicylyrics.org/v1/lyrics/";
+
+/// The file in the config directory that holds the Spicy Lyrics key.
+const SPICY_KEY_FILE: &str = "spicy_lyrics_key.txt";
+
+/// A track Spicy Lyrics knows, asked for only to see whether a key works.
+const SPICY_PROBE_TRACK: &str = "0V3wPSX9ygBnCm8psDIegu";
+
+/// The key from the `SPICY_LYRICS_KEY` environment variable, which wins over
+/// the stored one.
+fn spicy_env_key() -> Option<String> {
+    let key = std::env::var("SPICY_LYRICS_KEY").ok()?.trim().to_string();
+    (!key.is_empty()).then_some(key)
+}
+
+/// The Spicy Lyrics API key, from the `SPICY_LYRICS_KEY` environment variable
+/// or the key file in the config directory. Without a key the karaoke source
+/// is skipped, and Spotify and LRCLIB still answer.
+fn spicy_key(config_dir: &std::path::Path) -> Option<String> {
+    if let Some(key) = spicy_env_key() {
+        return Some(key);
+    }
+    let text = std::fs::read_to_string(config_dir.join(SPICY_KEY_FILE)).ok()?;
+    let key = text.trim().to_string();
+    (!key.is_empty()).then_some(key)
+}
+
+/// Writes the key file, readable only by its owner where the system allows.
+async fn store_spicy_key(path: &std::path::Path, key: &str) -> Result<(), String> {
+    if key.is_empty() {
+        return Err("the key is empty".into());
+    }
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("cannot create the config folder: {error}"))?;
+    }
+    tokio::fs::write(path, key)
+        .await
+        .map_err(|error| format!("cannot write the key file: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await;
+    }
+    Ok(())
+}
+
+/// Asks Spicy Lyrics for one known track to learn whether `key` works. Words
+/// or "not found" both mean the key was accepted.
+async fn check_spicy_key(http: &reqwest::Client, key: &str) -> crate::model::SpicyKeyStatus {
+    use crate::model::SpicyKeyStatus;
+    let response = http
+        .get(format!("{SPICY_API}{SPICY_PROBE_TRACK}"))
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Accept", "application/json")
+        .send()
+        .await;
+    match response {
+        Err(error) => SpicyKeyStatus::Unchecked(format!("cannot reach Spicy Lyrics: {error}")),
+        Ok(response) => match response.status() {
+            status if status.is_success() || status == reqwest::StatusCode::NOT_FOUND => {
+                SpicyKeyStatus::Working
+            }
+            reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+                SpicyKeyStatus::Rejected
+            }
+            reqwest::StatusCode::TOO_MANY_REQUESTS => SpicyKeyStatus::Unchecked(
+                "Spicy Lyrics is limiting requests; try again in a minute".into(),
+            ),
+            status => SpicyKeyStatus::Unchecked(format!("Spicy Lyrics answered {status}")),
+        },
+    }
+}
+
+/// Word-synced lyrics from the Spicy Lyrics API. Cached like the others,
+/// "none" included; `None` falls through to Spotify and LRCLIB. A transient
+/// failure (a bad key, a rate limit, no network) is not cached.
+async fn spicy_lyrics(
+    http: &reqwest::Client,
+    key: &str,
+    uri: &str,
+    cache_dir: &std::path::Path,
+) -> Option<crate::lyrics::Lyrics> {
+    let id = uri.strip_prefix("spotify:track:")?;
+    // "spicy2": answers cached before romanization was kept lack it.
+    let path = cache_dir.join(format!("spicy2-{id}.json"));
+    if let Some(cached) = crate::lyrics::cached(&path) {
+        return cached;
+    }
+    match spicy_request(http, key, id).await {
+        Ok(found) => {
+            crate::lyrics::store(&path, &found);
+            found
+        }
+        Err(error) => {
+            log::debug!("spicy lyrics unavailable: {error}");
+            None
+        }
+    }
+}
+
+/// One Spicy Lyrics request. `Ok(None)` is a definitive "no words here" worth
+/// caching; `Err` is a transient fault that should be retried next time.
+async fn spicy_request(
+    http: &reqwest::Client,
+    key: &str,
+    id: &str,
+) -> Result<Option<crate::lyrics::Lyrics>, String> {
+    let response = http
+        .get(format!("{SPICY_API}{id}"))
+        .header("Authorization", format!("Bearer {key}"))
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .map_err(|error| format!("cannot reach Spicy Lyrics: {error}"))?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return Err(format!(
+            "Spicy Lyrics rejected the key ({status}); check SPICY_LYRICS_KEY or spicy_lyrics_key.txt"
+        ));
+    }
+    if !status.is_success() {
+        return Err(format!("Spicy Lyrics answered {status}"));
+    }
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| format!("unexpected answer from Spicy Lyrics: {error}"))?;
+    Ok(crate::lyrics::from_spicy(&json))
 }
 
 /// Spotify's transcription of the track, when the local session can ask for

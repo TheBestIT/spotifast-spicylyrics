@@ -281,6 +281,9 @@ pub struct Settings {
     pub sidebar_grid: bool,
     pub sidebar_width: f32,
     pub lyrics_width: f32,
+    /// Show lyrics in Latin letters when the source has a romanization, for
+    /// scripts such as Japanese.
+    pub lyrics_romanize: bool,
     pub queue_width: f32,
     /// Use compact single-line rows without cover art in track lists.
     pub tracklist_compact: bool,
@@ -450,6 +453,7 @@ impl Default for Settings {
             sidebar_grid: false,
             sidebar_width: 250.0,
             lyrics_width: 360.0,
+            lyrics_romanize: false,
             queue_width: 360.0,
             tracklist_compact: false,
             middle_click_autoscroll: false,

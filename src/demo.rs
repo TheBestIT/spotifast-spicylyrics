@@ -672,6 +672,154 @@ fn sonos_devices(app: &mut App, active: bool) {
     }
 }
 
+/// Invented Japanese words for the sample track, with word-by-word timing
+/// and a romanization, as Spicy Lyrics sends them.
+#[cfg(any(test, feature = "demo"))]
+fn sample_japanese_lyrics() -> crate::lyrics::Lyrics {
+    type Part = (&'static str, &'static str);
+    let lines: [(u32, &str, &[Part]); 8] = [
+        (
+            66_000,
+            "yoru no michi wo hashiru",
+            &[
+                ("夜", "yoru"),
+                ("の", "no"),
+                ("道", "michi"),
+                ("を", "wo"),
+                ("走", "hashi"),
+                ("る", "ru"),
+            ],
+        ),
+        (
+            72_500,
+            "hoshi ga mite iru",
+            &[
+                ("星", "hoshi"),
+                ("が", "ga"),
+                ("見", "mi"),
+                ("て", "te"),
+                ("い", "i"),
+                ("る", "ru"),
+            ],
+        ),
+        (
+            79_000,
+            "kimi to futari de",
+            &[
+                ("君", "kimi"),
+                ("と", "to"),
+                ("二人", "futari"),
+                ("で", "de"),
+            ],
+        ),
+        (
+            85_500,
+            "doko made mo ikou",
+            &[
+                ("ど", "do"),
+                ("こ", "ko"),
+                ("ま", "ma"),
+                ("で", "de"),
+                ("も", "mo"),
+                ("行", "i"),
+                ("こ", "ko"),
+                ("う", "u"),
+            ],
+        ),
+        (
+            92_000,
+            "Shine on, hikari no naka e",
+            &[
+                ("Shine", "Shine"),
+                ("on,", "on,"),
+                ("光", "hikari"),
+                ("の", "no"),
+                ("中", "naka"),
+                ("へ", "e"),
+            ],
+        ),
+        (
+            98_500,
+            "ashita mo utau yo",
+            &[
+                ("明日", "ashita"),
+                ("も", "mo"),
+                ("歌", "uta"),
+                ("う", "u"),
+                ("よ", "yo"),
+            ],
+        ),
+        (
+            105_000,
+            "machi no akari ga kieru",
+            &[
+                ("街", "machi"),
+                ("の", "no"),
+                ("灯", "akari"),
+                ("が", "ga"),
+                ("消", "ki"),
+                ("え", "e"),
+                ("る", "ru"),
+            ],
+        ),
+        (
+            111_500,
+            "soredemo bokura wa",
+            &[
+                ("そ", "so"),
+                ("れ", "re"),
+                ("で", "de"),
+                ("も", "mo"),
+                ("僕", "boku"),
+                ("ら", "ra"),
+                ("は", "wa"),
+            ],
+        ),
+    ];
+    let lines = lines
+        .iter()
+        .map(|(at_ms, romanized, parts)| {
+            let step = 5_200 / parts.len() as u32;
+            let syllables: Vec<crate::lyrics::Syllable> = parts
+                .iter()
+                .enumerate()
+                .map(|(index, (text, romaji))| crate::lyrics::Syllable {
+                    text: (*text).to_string(),
+                    at_ms: at_ms + step * index as u32,
+                    end_ms: at_ms + step * (index as u32 + 1),
+                    // Japanese runs on without spaces; English words do not.
+                    part_of_word: !text.is_ascii(),
+                    romanized: Some((*romaji).to_string()),
+                })
+                .collect();
+            let text = parts
+                .iter()
+                .map(|(text, _)| {
+                    if text.is_ascii() {
+                        format!("{text} ")
+                    } else {
+                        (*text).to_string()
+                    }
+                })
+                .collect::<String>();
+            crate::lyrics::Line {
+                at_ms: Some(*at_ms),
+                end_ms: syllables.last().map(|syllable| syllable.end_ms),
+                text: text.trim().to_string(),
+                syllables,
+                romanized: Some((*romanized).to_string()),
+                ..Default::default()
+            }
+        })
+        .collect();
+    crate::lyrics::Lyrics {
+        lines,
+        synced: true,
+        instrumental: false,
+        rich: true,
+    }
+}
+
 /// Words to go with the sample track, timed so that the one being sung
 /// sits mid-panel at the demo's playback position.
 #[cfg(any(test, feature = "demo"))]
@@ -698,10 +846,12 @@ fn sample_lyrics() -> crate::lyrics::Lyrics {
             .map(|(at_ms, text)| crate::lyrics::Line {
                 at_ms: Some(*at_ms),
                 text: (*text).to_string(),
+                ..Default::default()
             })
             .collect(),
         synced: true,
         instrumental: false,
+        rich: false,
     }
 }
 
@@ -1019,6 +1169,29 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 });
             }
             "personal-app" => app.dialog = Some(Dialog::PersonalAppIntro),
+            // The Spicy Lyrics key setup, before and after a key is saved.
+            "spicy-lyrics" | "spicy-lyrics-working" => {
+                app.dialog = Some(Dialog::SpicyLyrics {
+                    key: String::new(),
+                    reveal: false,
+                });
+                app.spicy_key_status = if surface == "spicy-lyrics" {
+                    crate::model::SpicyKeyStatus::Missing
+                } else {
+                    crate::model::SpicyKeyStatus::Working
+                };
+            }
+            // Word-by-word Japanese lyrics shown in romaji, in the full-screen
+            // view drawn in the window as it is.
+            "romaji" => {
+                app.lyrics_uri = app.now_playing().map(|now| now.uri);
+                app.lyrics = Loadable::Loaded(Some(sample_japanese_lyrics()));
+                app.settings.lyrics_romanize = true;
+                app.spicy_key_status = crate::model::SpicyKeyStatus::Working;
+                app.lyrics_following = true;
+                app.show_lyrics_panel = true;
+                app.lyrics_fullscreen = Some(false);
+            }
             "many-devices" => {
                 app.show_devices = true;
                 app.devices.extend((0..40).map(|index| Device {
@@ -1175,6 +1348,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
                 app.lyrics_following = true;
+                app.spicy_key_status = crate::model::SpicyKeyStatus::Working;
                 app.show_lyrics_panel = true;
                 if surface == "lyrics-fullscreen" {
                     app.actions.push(Action::SetLyricsFullscreen(true));
@@ -1188,6 +1362,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 lyrics.instrumental = surface == "lyrics-fullscreen-instrumental";
                 app.lyrics = Loadable::Loaded(Some(lyrics));
                 app.lyrics_following = true;
+                app.spicy_key_status = crate::model::SpicyKeyStatus::Working;
                 app.show_lyrics_panel = true;
                 app.lyrics_fullscreen = Some(false);
             }

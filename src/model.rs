@@ -981,6 +981,33 @@ pub enum Dialog {
     PremiumNeeded,
     /// Introduce personal Spotify apps to eligible listeners once.
     PersonalAppIntro,
+    /// Set up the Spicy Lyrics key for word-by-word lyrics. `key` is the text
+    /// in the field; `reveal` shows it in clear.
+    SpicyLyrics {
+        key: String,
+        reveal: bool,
+    },
+}
+
+/// What is known about the Spicy Lyrics key.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SpicyKeyStatus {
+    /// Not asked yet.
+    #[default]
+    Unknown,
+    /// A check is running.
+    Checking,
+    /// No key is set.
+    Missing,
+    /// A key is set and Spicy Lyrics accepts it.
+    Working,
+    /// The key comes from the SPICY_LYRICS_KEY environment variable and works.
+    /// It cannot be changed from the app.
+    FromEnvironment,
+    /// Spicy Lyrics refused the key.
+    Rejected,
+    /// The key could not be checked; the reason is attached.
+    Unchecked(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1203,6 +1230,16 @@ pub enum Action {
     LyricsLineShown(Option<usize>),
     FollowLyrics,
     PauseLyricsFollow,
+    /// Switch the lyrics between the original script and Latin letters.
+    ToggleLyricsRomanize,
+    /// Open the Spicy Lyrics key setup and check the key that is set.
+    OpenSpicyLyricsSetup,
+    /// Ask whether a Spicy Lyrics key is set and whether it works.
+    CheckSpicyKey,
+    /// Store this Spicy Lyrics key, check it, and fetch the lyrics again.
+    SaveSpicyKey(String),
+    /// Forget the stored Spicy Lyrics key.
+    RemoveSpicyKey,
     RetryLyrics,
     ToggleDevicesPopup,
     /// Ask GitHub for the latest release and report the result to the user.
