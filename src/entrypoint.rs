@@ -73,6 +73,19 @@ struct Cli {
     #[arg(long, value_name = "MS", default_value_t = 6000)]
     demo_shot_delay: u64,
 
+    /// Capture this many frames in a row for `--demo-shot`, which is then a
+    /// folder: up to 30 frames a second, each written as
+    /// `frame-<number>-<milliseconds>.png` with the time since the first
+    /// frame, so a video made from them can follow real time.
+    #[cfg(feature = "demo")]
+    #[arg(
+        long,
+        value_name = "COUNT",
+        default_value_t = 1,
+        requires = "demo_shot"
+    )]
+    demo_shot_frames: u32,
+
     /// Inner window size for `--demo-shot`, as `WIDTHxHEIGHT`.
     #[cfg(feature = "demo")]
     #[arg(long, value_name = "WIDTHxHEIGHT", value_parser = parse_demo_size)]
@@ -561,6 +574,9 @@ pub(crate) fn run() -> eframe::Result<()> {
         path,
         due: std::time::Instant::now() + std::time::Duration::from_millis(cli.demo_shot_delay),
         asked: false,
+        frames: cli.demo_shot_frames.max(1),
+        taken: 0,
+        first: None,
     });
     #[cfg(feature = "demo")]
     let demo_drag = cli
@@ -1286,7 +1302,7 @@ impl Shell {
                 MenuCommand::Back => Action::Back,
                 MenuCommand::Forward => Action::Forward,
                 MenuCommand::OpenRepo => {
-                    ctx.open_url(egui::OpenUrl::new_tab("https://github.com/crmne/spotifast"));
+                    ctx.open_url(egui::OpenUrl::new_tab(env!("CARGO_PKG_REPOSITORY")));
                     continue;
                 }
                 // Editing goes through egui, which owns the text field
@@ -1399,6 +1415,11 @@ struct Shot {
     path: std::path::PathBuf,
     due: std::time::Instant,
     asked: bool,
+    /// How many frames to capture; more than one makes `path` a folder.
+    frames: u32,
+    taken: u32,
+    /// When the first frame was asked for, the zero of the frame times.
+    first: Option<std::time::Instant>,
 }
 
 #[cfg(feature = "demo")]
@@ -1415,6 +1436,7 @@ impl Shell {
         if !shot.asked && std::time::Instant::now() >= shot.due {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
             shot.asked = true;
+            shot.first.get_or_insert_with(std::time::Instant::now);
         }
 
         let image = ctx.input(|input| {
@@ -1433,12 +1455,31 @@ impl Shell {
             .iter()
             .flat_map(|pixel| pixel.to_srgba_unmultiplied())
             .collect();
+        let path = if shot.frames > 1 {
+            let _ = std::fs::create_dir_all(&shot.path);
+            let millis = shot.first.map_or(0, |first| first.elapsed().as_millis());
+            shot.path
+                .join(format!("frame-{:05}-{millis:07}.png", shot.taken))
+        } else {
+            shot.path.clone()
+        };
         match image::RgbaImage::from_raw(width, height, pixels) {
-            Some(buffer) => match buffer.save(&shot.path) {
-                Ok(()) => log::info!("wrote {}x{} to {}", width, height, shot.path.display()),
-                Err(error) => log::error!("could not write {}: {error}", shot.path.display()),
+            Some(buffer) => match buffer.save(&path) {
+                Ok(()) => log::info!("wrote {}x{} to {}", width, height, path.display()),
+                Err(error) => log::error!("could not write {}: {error}", path.display()),
             },
             None => log::error!("the frame buffer did not match {width}x{height}"),
+        }
+        shot.taken += 1;
+        if shot.taken < shot.frames {
+            // The next frame a thirtieth of a second after the last one was
+            // due; the file names carry the real times either way.
+            shot.asked = false;
+            if let Some(first) = shot.first {
+                shot.due =
+                    first + std::time::Duration::from_millis(u64::from(shot.taken) * 1000 / 30);
+            }
+            return;
         }
         self.shot = None;
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
