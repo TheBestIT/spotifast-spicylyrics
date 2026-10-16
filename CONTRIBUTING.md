@@ -1,3 +1,5 @@
+> **Note for this fork:** this guide is the policy of the original Spotifast project. For the fork, open issues and pull requests about lyrics, romaji and the Spicy Lyrics menu in this repository. Read the [README](README.md#report-a-problem) first.
+
 # Contributing to Spotifast
 
 Spotifast is a native Spotify client. Changes should improve the
