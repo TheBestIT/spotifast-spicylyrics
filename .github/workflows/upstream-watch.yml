@@ -1,0 +1,89 @@
+name: Upstream watch
+
+# Opens an issue when crmne/spotifast publishes a release that is newer than
+# the fork base version. Major, minor and patch releases all open an issue.
+# GitHub then notifies the owner. The job runs once a day.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    name: Check upstream release
+    if: github.repository == 'TheBestIT/spotifast-spicylyrics'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPSTREAM: crmne/spotifast
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for a new upstream release
+        run: |
+          set -euo pipefail
+
+          # Return success (0) when version $1 is newer than version $2.
+          # Both arguments are versions like 1.2.3, with no "v".
+          is_update() {
+            [ "$1" != "$2" ] &&
+              [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+          }
+
+          # The latest release API call skips drafts and prereleases.
+          tag="$(gh api "repos/${UPSTREAM}/releases/latest" --jq .tag_name)"
+          up_version="${tag#v}"
+
+          # The fork version is <upstream>-spicy.N. Remove the suffix.
+          cargo_version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          fork_base="${cargo_version%%-spicy*}"
+
+          echo "Upstream tag: ${tag}"
+          echo "Fork base version: ${fork_base}"
+
+          if ! is_update "$up_version" "$fork_base"; then
+            echo "No new upstream release. Nothing to do."
+            exit 0
+          fi
+
+          title="Upstream release: ${tag}"
+
+          # Do not open the same issue twice. Search open and closed issues.
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state all \
+            --search "in:title \"${title}\"" --limit 100 --json title \
+            | jq --arg t "$title" '[.[] | select(.title == $t)] | length')"
+          if [ "$existing" -gt 0 ]; then
+            echo "Issue already exists: ${title}"
+            exit 0
+          fi
+
+          release_url="$(gh api "repos/${UPSTREAM}/releases/latest" --jq .html_url)"
+          # Keep the notes below the issue size limit.
+          notes="$(gh api "repos/${UPSTREAM}/releases/latest" --jq '.body // ""' \
+            | head -c 20000)"
+
+          {
+            echo "Upstream published a new release."
+            echo
+            echo "- Upstream tag: \`${tag}\`"
+            echo "- Fork base version: \`${fork_base}\` (Cargo.toml: \`${cargo_version}\`)"
+            echo "- Release: ${release_url}"
+            echo "- Compare: https://github.com/${UPSTREAM}/compare/v${fork_base}...${tag}"
+            echo
+            echo "## Release notes"
+            echo
+            echo "$notes"
+          } > body.md
+
+          gh label create upstream-update --repo "$GITHUB_REPOSITORY" \
+            --color B60205 --description "New release in upstream" --force
+
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --body-file body.md \
+            --label upstream-update \
+            --assignee TheBestIT
