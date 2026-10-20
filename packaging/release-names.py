@@ -18,9 +18,9 @@ APPIMAGE_ARCHITECTURES = {
 
 def update_information(arch):
     """What each AppImage must carry for AppImageUpdate and the updaters
-    built on it: the newest stable release's .zsync file for its own
-    architecture."""
-    return f"gh-releases-zsync|crmne|spotifast|latest|spotifast-*-{arch}.AppImage.zsync"
+    built on it: the .zsync file for its own architecture in the release
+    of this fork that GitHub marks as Latest (release.yml, make_latest)."""
+    return f"gh-releases-zsync|TheBestIT|spotifast-spicylyrics|latest|spotifast-*-{arch}.AppImage.zsync"
 
 
 def section(data, name):

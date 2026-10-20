@@ -105,10 +105,15 @@ jobs:
             packaging/linux/nfpm.yaml > nfpm.yaml
           ./nfpm pkg --config nfpm.yaml --packager deb --target "spotifast-$TAG-${{ matrix.deb }}.deb"
           ./nfpm pkg --config nfpm.yaml --packager rpm --target "spotifast-$TAG-${{ matrix.rpm }}.rpm"
+      # The AppImage keeps the name that the updater downloads:
+      # spotifast-<version>-<arch>.AppImage, without the v. The update
+      # information and the .zsync file let AppImageUpdate find the next
+      # release. checksums.txt lists the AppImage and the .zsync file, and
+      # the signature covers both (release-names.py).
       - name: AppImage
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends file desktop-file-utils
+          sudo apt-get install -y --no-install-recommends file desktop-file-utils zsync
           app=AppDir
           install -Dm755 "$PAYLOAD/spotifast" "$app/usr/bin/spotifast"
           install -Dm644 packaging/applications/spotifast.desktop "$app/usr/share/applications/spotifast.desktop"
@@ -120,19 +125,28 @@ jobs:
           chmod +x "$app/AppRun"
           curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage }}.AppImage"
           chmod +x appimagetool
-          ARCH=${{ matrix.appimage }} APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream "$app" "spotifast-$TAG-${{ matrix.appimage }}.AppImage"
+          name="spotifast-${TAG#v}-${{ matrix.appimage }}.AppImage"
+          ARCH=${{ matrix.appimage }} APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream \
+            -u "gh-releases-zsync|TheBestIT|spotifast-spicylyrics|latest|spotifast-*-${{ matrix.appimage }}.AppImage.zsync" \
+            "$app" "$name"
+          # Write the .zsync file again, so that its Filename and URL are the
+          # AppImage name alone, as release-names.py expects.
+          rm -f "$name.zsync"
+          zsyncmake -u "$name" -o "$name.zsync" "$name"
+          echo "APPIMAGE=$name" >> "$GITHUB_ENV"
       - name: Check that the packages install and start
         run: |
           sudo apt-get install -y "./spotifast-$TAG-${{ matrix.deb }}.deb"
           spotifast --version
-          "./spotifast-$TAG-${{ matrix.appimage }}.AppImage" --appimage-extract-and-run --version
+          "./$APPIMAGE" --appimage-extract-and-run --version
+          python3 packaging/check-appimage.py "$APPIMAGE" ${{ matrix.appimage }}
           rpm -qip "spotifast-$TAG-${{ matrix.rpm }}.rpm" | head -5 || true
       - name: Attach to the release
         run: |
           gh release upload "$TAG" --clobber --repo "$GITHUB_REPOSITORY" \
             "spotifast-$TAG-${{ matrix.deb }}.deb" \
             "spotifast-$TAG-${{ matrix.rpm }}.rpm" \
-            "spotifast-$TAG-${{ matrix.appimage }}.AppImage"
+            "$APPIMAGE" "$APPIMAGE.zsync"
 
   checksums:
     name: Checksums
@@ -142,7 +156,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download every release file
-        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "spotifast-$TAG-*" --dir dist
+        # The AppImages and their .zsync files have no v in the name.
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern "spotifast-$TAG-*" --pattern "spotifast-${TAG#v}-*.AppImage*"
       - name: Write checksums.txt
         run: python3 packaging/release-names.py dist "$TAG"
       - uses: ruby/setup-ruby@v1

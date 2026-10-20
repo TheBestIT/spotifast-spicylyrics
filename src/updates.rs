@@ -27,11 +27,10 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     // pre-release. The channel considers every release of this repository
     // and takes the highest, so fork builds update from fork releases only.
     prereleases: fastframe_update::Prereleases::WhenRunningPrerelease,
-    // Upstream AppImages replace themselves (appimage: true, #737). The fork
-    // builds its AppImages after the release, without the native-packages
-    // name, the .zsync file or the update information. Thus the fork keeps
-    // the default: an AppImage tells the user to use the download page.
-    appimage: false,
+    // An AppImage replaces itself, as upstream does (#737). packages.yml
+    // names the fork AppImages spotifast-<version>-<arch>.AppImage, the name
+    // that the updater downloads, and the signed checksums.txt lists them.
+    appimage: true,
     ..UpdateConfig::new(
         "TheBestIT/spotifast-spicylyrics",
         "Spotifast",
@@ -65,11 +64,11 @@ mod tests {
         CONFIG.validate().unwrap();
     }
 
-    /// The fork AppImages do not carry the native-packages name that the
-    /// updater downloads (packages.yml). Thus an AppImage must not try to
-    /// replace itself.
+    /// An AppImage may replace itself only because packages.yml gives the
+    /// fork AppImages the name that the updater downloads, and the signed
+    /// checksums.txt lists them (release-names.py).
     #[test]
-    fn fork_appimages_do_not_update_themselves() {
-        const { assert!(!CONFIG.appimage) };
+    fn appimages_update_themselves() {
+        const { assert!(CONFIG.appimage) };
     }
 }
