@@ -28,23 +28,23 @@ fail() { printf '\033[31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 if [ "$deps" = 1 ]; then
     step "Install the build packages"
     if command -v apt-get >/dev/null; then
-        packages="build-essential pkg-config curl libasound2-dev libpulse-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev"
-        [ "$milkdrop" = 1 ] && packages="$packages cmake libclang-dev"
+        packages="build-essential pkg-config curl libasound2-dev libpipewire-0.3-dev libclang-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libdbus-1-dev"
+        [ "$milkdrop" = 1 ] && packages="$packages cmake"
         sudo apt-get update && sudo apt-get install -y $packages
     elif command -v dnf >/dev/null; then
-        packages="gcc gcc-c++ make pkgconf-pkg-config curl alsa-lib-devel pulseaudio-libs-devel libxkbcommon-devel wayland-devel mesa-libGL-devel mesa-libEGL-devel dbus-devel"
-        [ "$milkdrop" = 1 ] && packages="$packages cmake clang-devel"
+        packages="gcc gcc-c++ make pkgconf-pkg-config curl alsa-lib-devel pipewire-devel clang-devel libxkbcommon-devel wayland-devel mesa-libGL-devel mesa-libEGL-devel dbus-devel"
+        [ "$milkdrop" = 1 ] && packages="$packages cmake"
         sudo dnf install -y $packages
     elif command -v pacman >/dev/null; then
-        packages="base-devel curl alsa-lib libpulse libxkbcommon wayland mesa dbus"
-        [ "$milkdrop" = 1 ] && packages="$packages cmake clang"
+        packages="base-devel curl alsa-lib pipewire clang libxkbcommon wayland mesa dbus"
+        [ "$milkdrop" = 1 ] && packages="$packages cmake"
         sudo pacman -S --needed --noconfirm $packages
     elif command -v zypper >/dev/null; then
-        packages="gcc gcc-c++ make pkg-config curl alsa-devel libpulse-devel libxkbcommon-devel wayland-devel Mesa-libGL-devel dbus-1-devel"
-        [ "$milkdrop" = 1 ] && packages="$packages cmake clang-devel"
+        packages="gcc gcc-c++ make pkg-config curl alsa-devel pipewire-devel clang-devel libxkbcommon-devel wayland-devel Mesa-libGL-devel dbus-1-devel"
+        [ "$milkdrop" = 1 ] && packages="$packages cmake"
         sudo zypper install -y $packages
     else
-        fail "Unknown package manager. Install a C compiler and the ALSA, PulseAudio, xkbcommon, Wayland, OpenGL and D-Bus development packages."
+        fail "Unknown package manager. Install a C compiler and the ALSA, PipeWire, libclang, xkbcommon, Wayland, OpenGL and D-Bus development packages."
     fi
 fi
 
