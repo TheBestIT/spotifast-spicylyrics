@@ -63,8 +63,8 @@
     <control>keyboard</control>
   </supports>
   <releases>
-    <release version="0.14.0-spicy.1" date="2026-10-20">
-      <url>https://github.com/TheBestIT/spotifast-spicylyrics/releases/tag/v0.14.0-spicy.1</url>
+    <release version="0.14.1-spicy.1" date="2026-10-21">
+      <url>https://github.com/TheBestIT/spotifast-spicylyrics/releases/tag/v0.14.1-spicy.1</url>
     </release>
     <release version="0.14.1" date="2026-10-20">
       <url>https://github.com/crmne/spotifast/releases/tag/v0.14.1</url>

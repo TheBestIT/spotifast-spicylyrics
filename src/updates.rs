@@ -23,7 +23,7 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     // This fork signs with its own key, so an upstream build can never be
     // installed over it by the updater, and the other way round.
     publisher_key: Some(include_str!("../assets/update-public-key.hex")),
-    // Fork versions carry a suffix (0.14.0-spicy.1), which semver reads as a
+    // Fork versions carry a suffix (0.14.1-spicy.1), which semver reads as a
     // pre-release. The channel considers every release of this repository
     // and takes the highest, so fork builds update from fork releases only.
     prereleases: fastframe_update::Prereleases::WhenRunningPrerelease,
