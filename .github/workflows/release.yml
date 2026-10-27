@@ -222,7 +222,7 @@ jobs:
           # Publish reviewed notes immediately, not a generated PR-only summary.
           body_path: packaging/release-notes/${{ github.ref_name }}.md
           generate_release_notes: false
-          # Every fork version carries a suffix (v0.14.1-spicy.1). Mark them
+          # Every fork version carries a suffix (v0.14.2-spicy.1). Mark them
           # as full releases so the download links and "Latest" point at them;
           # fork builds update through the pre-release channel either way.
           prerelease: false

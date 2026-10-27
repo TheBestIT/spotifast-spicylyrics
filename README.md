@@ -102,6 +102,15 @@ ARM computers use the `aarch64` or `arm64` files.
   fork, and accepts only files signed with the key of this fork. An update of
   the original Spotifast cannot replace the fork by accident.
 - **Playback needs Spotify Premium**, as in Spotifast.
+- **Sign-in needs your own Spotify app.** Since Spotifast 0.14.2, you make a
+  free app in the
+  [Spotify developer dashboard](https://developer.spotify.com/dashboard) and
+  paste its Client ID in the sign-in screen. Use the redirect URI
+  `http://127.0.0.1:8989/login` and tick **Web API**. The
+  [Spotifast guide](https://spotifast.rocks/getting-started/#make-a-spotify-app)
+  shows the steps.
+- **Local files play.** Set a folder in Settings, and the app plays the local
+  files that your playlists list.
 
 ## Set up Spicy Lyrics
 
@@ -264,10 +273,10 @@ no telemetry and no server of its own.
 ## The fork and the original
 
 - **Base.** The fork starts from Spotifast
-  [v0.14.1](https://github.com/crmne/spotifast/releases/tag/v0.14.1). The
+  [v0.14.2](https://github.com/crmne/spotifast/releases/tag/v0.14.2). The
   history of the original stays in this repository.
 - **Versions.** A fork version is the Spotifast version plus a suffix:
-  `0.14.1-spicy.1` is the first fork release on Spotifast 0.14.1.
+  `0.14.2-spicy.1` is the first fork release on Spotifast 0.14.2.
 - **What changes.** The lyrics features above, the setup menu, the update
   source, the release workflows, and the package metadata (publisher and
   links). Everything else is the same as the original.

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.14.1-spicy.1
+        description: Release tag, for example v0.14.2-spicy.1
         required: true
         type: string
   workflow_call:
