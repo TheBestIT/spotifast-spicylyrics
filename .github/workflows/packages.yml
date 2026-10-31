@@ -113,7 +113,7 @@ jobs:
       - name: AppImage
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends file desktop-file-utils zsync
+          sudo apt-get install -y --no-install-recommends file desktop-file-utils zsync librsvg2-bin
           app=AppDir
           install -Dm755 "$PAYLOAD/spotifast" "$app/usr/bin/spotifast"
           install -Dm644 packaging/applications/spotifast.desktop "$app/usr/share/applications/spotifast.desktop"
@@ -121,6 +121,11 @@ jobs:
           install -Dm644 "$PAYLOAD/LICENSE" "$app/usr/share/licenses/spotifast/LICENSE"
           install -Dm644 "$PAYLOAD/THIRD-PARTY-NOTICES.md" "$app/usr/share/doc/spotifast/THIRD-PARTY-NOTICES.md"
           cp packaging/applications/spotifast.desktop packaging/icons/spotifast.svg "$app/"
+          # A newer appimagetool needs a PNG or XPM icon at the top of the
+          # AppDir, and a .DirIcon file.
+          rsvg-convert -w 256 -h 256 packaging/icons/spotifast.svg -o "$app/spotifast.png"
+          install -Dm644 "$app/spotifast.png" "$app/usr/share/icons/hicolor/256x256/apps/spotifast.png"
+          cp "$app/spotifast.png" "$app/.DirIcon"
           printf '#!/bin/sh\nhere="$(dirname "$(readlink -f "$0")")"\nexec "$here/usr/bin/spotifast" "$@"\n' > "$app/AppRun"
           chmod +x "$app/AppRun"
           curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${{ matrix.appimage }}.AppImage"
