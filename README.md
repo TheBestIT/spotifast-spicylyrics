@@ -45,8 +45,8 @@
 | **Same views** | The side panel, the full screen view and the cinema view all show the fill. Smooth scroll and click-to-seek stay. |
 
 Everything else is Spotifast: a fast, native Spotify client in Rust, with
-Spotify Connect, a Winamp mini player, MilkDrop visuals, and 100 to 250 MB
-of memory. Read the [Spotifast guide](https://spotifast.rocks) for these parts.
+Spotify Connect, the optional Spotify Soloist player, a Winamp mini player,
+MilkDrop visuals, and 100 to 250 MB of memory. Read the [Spotifast guide](https://spotifast.rocks) for these parts.
 
 ## Screenshots
 
@@ -273,10 +273,10 @@ no telemetry and no server of its own.
 ## The fork and the original
 
 - **Base.** The fork starts from Spotifast
-  [v0.14.2](https://github.com/crmne/spotifast/releases/tag/v0.14.2). The
+  [v0.15.0](https://github.com/crmne/spotifast/releases/tag/v0.15.0). The
   history of the original stays in this repository.
 - **Versions.** A fork version is the Spotifast version plus a suffix:
-  `0.14.2-spicy.1` is the first fork release on Spotifast 0.14.2.
+  `0.15.0-spicy.1` is the first fork release on Spotifast 0.15.0.
 - **What changes.** The lyrics features above, the setup menu, the update
   source, the release workflows, and the package metadata (publisher and
   links). Everything else is the same as the original.

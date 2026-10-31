@@ -1,5 +1,9 @@
-﻿; The Windows installer, built with Inno Setup 6.3 or later from a release
-; binary (the release workflow does this on every tag):
+﻿; The fork still ships this setup program. Upstream Spotifast ships only the
+; Windows Installer package (spotifast.wxs) after 0.14.2. test-msi.py also
+; builds this script to make a copy for the package to take over.
+;
+; The Windows installer, built with Inno Setup 6.3 or later from a release
+; binary (the fork release workflow does this on every tag):
 ;
 ;   iscc /DVersion=0.9.1 /DArch=x86_64 /DBinary=...\spotifast.exe ^
 ;        /DOutputDir=dist packaging\windows\spotifast.iss
