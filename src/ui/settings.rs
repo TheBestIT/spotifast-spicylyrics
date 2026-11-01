@@ -2307,7 +2307,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let spicy_romaji = gettext(locale, "Romaji for Japanese lyrics");
     let spicy_romaji_detail = gettext(
         locale,
-        "Show Japanese lyrics in Latin letters. The Romaji button in the lyrics header does the same.",
+        "Show Japanese lyrics in kanji, in romaji (Latin letters), or in both. The Romaji button in the lyrics header does the same.",
     );
     let spicy_rows = [
         RowText::new(spicy_karaoke.clone(), spicy_karaoke_detail.clone()),
@@ -2352,10 +2352,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 ui.add_space(6.0);
             }
             filtered_row(ui, &palette, &needle, spicy_title, &spicy_rows[1], |ui| {
-                let mut romanize = app.settings.lyrics_romanize;
-                if widgets::switch(ui, &palette, &spicy_romaji, &mut romanize).changed() {
-                    app.actions.push(Action::ToggleLyricsRomanize);
-                }
+                lyrics_script_picker(app, ui, &spicy_romaji);
             });
         });
     }
@@ -2623,6 +2620,33 @@ fn pair_picker(app: &mut App, ui: &mut egui::Ui, base: fastframe_theme::Base, na
     response.response.widget_info(|| {
         let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), name);
         info.current_text_value = Some(selected.to_string());
+        info
+    });
+}
+
+/// The four lyrics script modes, as the header menu of the lyrics shows them.
+fn lyrics_script_picker(app: &mut App, ui: &mut egui::Ui, name: &str) {
+    use crate::settings::LyricsScript;
+    let locale = app.locale;
+    let current = app.settings.lyrics_script;
+    let selected = super::lyrics::script_label(locale, current);
+    let response = egui::ComboBox::from_id_salt("lyrics_script")
+        .selected_text(selected.as_str())
+        .width(200.0_f32.min(ui.available_width()))
+        .show_ui(ui, |ui| {
+            for mode in LyricsScript::ALL {
+                if ui
+                    .selectable_label(mode == current, super::lyrics::script_label(locale, mode))
+                    .clicked()
+                    && mode != current
+                {
+                    app.actions.push(Action::SetLyricsScript(mode));
+                }
+            }
+        });
+    response.response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), name);
+        info.current_text_value = Some(selected.clone());
         info
     });
 }

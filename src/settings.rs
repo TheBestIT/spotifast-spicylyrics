@@ -59,6 +59,56 @@ pub enum TrayIcon {
     Black,
 }
 
+/// The scripts of the lyrics lines for a song with romaji. The first word
+/// of each name tells which script is on the main line.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LyricsScript {
+    /// The romaji on the main line, and the original text under it.
+    RomajiOnTop,
+    /// The original text on the main line, and the romaji under it.
+    KanjiOnTop,
+    /// Only the original text.
+    #[default]
+    KanjiOnly,
+    /// Only the romaji.
+    RomajiOnly,
+}
+
+impl LyricsScript {
+    /// All the modes, in the order of the menus.
+    pub const ALL: [Self; 4] = [
+        Self::RomajiOnTop,
+        Self::KanjiOnTop,
+        Self::KanjiOnly,
+        Self::RomajiOnly,
+    ];
+
+    /// The view shows the original text.
+    pub fn shows_original(self) -> bool {
+        self != Self::RomajiOnly
+    }
+
+    /// The view shows the romaji.
+    pub fn shows_romaji(self) -> bool {
+        self != Self::KanjiOnly
+    }
+
+    /// The romaji is on the main line.
+    pub fn romaji_is_main(self) -> bool {
+        matches!(self, Self::RomajiOnTop | Self::RomajiOnly)
+    }
+}
+
+/// Reads a lyrics script. An unknown value gives the default, thus the
+/// other settings in the file still load.
+fn read_lyrics_script<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<LyricsScript, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// Whether a Home shelf is drawn. Hidden shelves still refresh normally.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -332,9 +382,16 @@ pub struct Settings {
     pub sidebar_grid: bool,
     pub sidebar_width: f32,
     pub lyrics_width: f32,
-    /// Show lyrics in Latin letters when the source has a romanization, for
-    /// scripts such as Japanese.
+    /// The old romaji switch of 0.15.0-spicy.1 and earlier. A file without
+    /// `lyrics_script` loads it as the script mode. The file keeps it, equal
+    /// to `LyricsScript::romaji_is_main`, thus an older version that reads
+    /// the file keeps the romaji. Change it only through `set_lyrics_script`.
+    #[serde(default)]
     pub lyrics_romanize: bool,
+    /// The scripts that the lyrics show when the source has a romanization,
+    /// for scripts such as Japanese.
+    #[serde(deserialize_with = "read_lyrics_script")]
+    pub lyrics_script: LyricsScript,
     pub queue_width: f32,
     /// Use compact single-line rows without cover art in track lists.
     pub tracklist_compact: bool,
@@ -517,6 +574,7 @@ impl Default for Settings {
             sidebar_width: 250.0,
             lyrics_width: 360.0,
             lyrics_romanize: false,
+            lyrics_script: LyricsScript::KanjiOnly,
             queue_width: 360.0,
             tracklist_compact: false,
             middle_click_autoscroll: false,
@@ -681,6 +739,7 @@ impl Settings {
                     Self::default()
                 });
                 settings.migrate_proxy(text);
+                settings.migrate_lyrics_script(text);
                 settings.forget_unusable_screen_rate();
                 settings.proxy_password_legacy = !settings.proxy_password.is_empty();
                 settings
@@ -728,6 +787,27 @@ impl Settings {
         }
         self.milkdrop_fps = crate::milkdrop::DEFAULT_FPS;
         self.milkdrop_screen_hz = 0;
+    }
+
+    /// Changes the old romaji switch to the lyrics script. A file without
+    /// `lyrics_script` comes from an older version. There, the switch on
+    /// showed only the romaji, and the switch off showed only the original.
+    pub(crate) fn migrate_lyrics_script(&mut self, text: &str) {
+        let script = if text.contains("\"lyrics_script\"") {
+            self.lyrics_script
+        } else if self.lyrics_romanize {
+            LyricsScript::RomajiOnly
+        } else {
+            LyricsScript::KanjiOnly
+        };
+        self.set_lyrics_script(script);
+    }
+
+    /// Sets the lyrics script mode and the old romaji switch with it. The
+    /// switch is on when the romaji is on the main line.
+    pub fn set_lyrics_script(&mut self, script: LyricsScript) {
+        self.lyrics_script = script;
+        self.lyrics_romanize = script.romaji_is_main();
     }
 
     pub(crate) fn migrate_proxy(&mut self, text: &str) {
@@ -1030,6 +1110,61 @@ mod tests {
         assert!(settings.system_theme_cache.is_none());
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.volume, 37);
+    }
+
+    /// The old romaji switch loads as the mode that it showed: on was only
+    /// the romaji, off was only the original text. The new field wins, and
+    /// an unknown mode gives the default. The file keeps the old switch for
+    /// an older version: on when the romaji is on the main line.
+    #[test]
+    fn the_old_romaji_switch_loads_as_a_lyrics_script() {
+        use super::LyricsScript;
+        let root =
+            std::env::temp_dir().join(format!("spotifast-lyrics-script-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let load = |name: &str, json: &str| {
+            let path = root.join(name);
+            std::fs::write(&path, json).unwrap();
+            Settings::load(&path)
+        };
+        assert_eq!(Settings::default().lyrics_script, LyricsScript::KanjiOnly);
+        let on = load("on.json", r#"{"lyrics_romanize": true, "volume": 37}"#);
+        assert_eq!(on.lyrics_script, LyricsScript::RomajiOnly);
+        assert_eq!(on.volume, 37);
+        let off = load("off.json", r#"{"lyrics_romanize": false, "volume": 37}"#);
+        assert_eq!(off.lyrics_script, LyricsScript::KanjiOnly);
+        let empty = load("empty.json", "{}");
+        assert_eq!(empty.lyrics_script, LyricsScript::KanjiOnly);
+        let both = load(
+            "both.json",
+            r#"{"lyrics_romanize": true, "lyrics_script": "kanji_on_top"}"#,
+        );
+        assert_eq!(both.lyrics_script, LyricsScript::KanjiOnTop);
+        let unknown = load(
+            "unknown.json",
+            r#"{"lyrics_script": "upside_down", "volume": 37}"#,
+        );
+        assert_eq!(unknown.lyrics_script, LyricsScript::KanjiOnly);
+        assert_eq!(unknown.volume, 37);
+        for mode in LyricsScript::ALL {
+            let mut settings = Settings::default();
+            settings.set_lyrics_script(mode);
+            let encoded = settings.encode().unwrap();
+            let path = root.join("round-trip.json");
+            std::fs::write(&path, &encoded).unwrap();
+            assert_eq!(Settings::load(&path).lyrics_script, mode);
+            // An older version reads only the old switch.
+            let old: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(
+                old["lyrics_romanize"],
+                serde_json::Value::Bool(mode.romaji_is_main()),
+                "{mode:?}"
+            );
+        }
+        // A file from an older version, saved again, keeps its switch.
+        let on = load("on.json", r#"{"lyrics_romanize": true}"#);
+        assert!(on.lyrics_romanize);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Files from before fastframe-audio was the only output name a

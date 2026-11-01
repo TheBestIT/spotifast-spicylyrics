@@ -11,6 +11,7 @@ pub mod home;
 mod keys;
 pub mod library;
 pub mod login;
+mod lyric_line;
 mod lyrics;
 pub mod new_releases;
 pub mod player_bar;

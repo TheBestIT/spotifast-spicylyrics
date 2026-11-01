@@ -12082,12 +12082,14 @@ impl App {
                 self.backend
                     .send(Command::SpicyKey(SpicyKeyRequest::Remove));
             }
-            Action::ToggleLyricsRomanize => {
-                self.settings.lyrics_romanize = !self.settings.lyrics_romanize;
-                self.settings_dirty = true;
-                // The lines change length, so find the sung line again.
-                self.lyrics_following = true;
-                self.lyrics_line_shown = None;
+            Action::SetLyricsScript(script) => {
+                if self.settings.lyrics_script != script {
+                    self.settings.set_lyrics_script(script);
+                    self.settings_dirty = true;
+                    // The lines change length, so find the sung line again.
+                    self.lyrics_following = true;
+                    self.lyrics_line_shown = None;
+                }
             }
             Action::RetryLyrics => self.request_lyrics(),
             Action::ToggleDevicesPopup => {

@@ -999,6 +999,205 @@ fn sample_japanese_lyrics() -> crate::lyrics::Lyrics {
     }
 }
 
+/// Invented words for two singers, for `--demo-show duet`. The second
+/// singer's lines align to the right. Some lines have background vocals,
+/// and one Japanese line has romaji for its background too.
+#[cfg(feature = "demo")]
+fn sample_duet_lyrics() -> crate::lyrics::Lyrics {
+    use crate::lyrics::{Line, Syllable};
+    /// A word and its romaji (empty for none).
+    type Word = (&'static str, &'static str);
+    // Each word gets an equal share of `span`, from `at_ms`.
+    let syllables = |at_ms: u32, span: u32, words: &[Word]| -> Vec<Syllable> {
+        let step = span / words.len().max(1) as u32;
+        words
+            .iter()
+            .enumerate()
+            .map(|(index, (text, romaji))| Syllable {
+                text: (*text).to_string(),
+                at_ms: at_ms + step * index as u32,
+                end_ms: at_ms + step * (index as u32 + 1),
+                // Japanese runs on without spaces; English words do not.
+                part_of_word: !text.is_ascii(),
+                romanized: (!romaji.is_empty()).then(|| (*romaji).to_string()),
+            })
+            .collect()
+    };
+    /// The start, the second singer, the lead words, the start of the
+    /// background from the start of the line, and the background words.
+    type DuetLine = (u32, bool, &'static [Word], u32, &'static [Word]);
+    let lines: [DuetLine; 10] = [
+        (
+            53_000,
+            false,
+            &[
+                ("Paper", ""),
+                ("lanterns", ""),
+                ("on", ""),
+                ("the", ""),
+                ("water", ""),
+            ],
+            0,
+            &[],
+        ),
+        (
+            59_500,
+            true,
+            &[
+                ("I", ""),
+                ("can", ""),
+                ("see", ""),
+                ("them", ""),
+                ("from", ""),
+                ("the", ""),
+                ("other", ""),
+                ("shore", ""),
+            ],
+            0,
+            &[],
+        ),
+        (
+            66_000,
+            false,
+            &[
+                ("Hold", ""),
+                ("the", ""),
+                ("light", ""),
+                ("until", ""),
+                ("the", ""),
+                ("morning", ""),
+            ],
+            3_600,
+            &[("Yeah", "")],
+        ),
+        (
+            72_500,
+            true,
+            &[
+                ("Every", ""),
+                ("little", ""),
+                ("wave", ""),
+                ("across", ""),
+                ("the", ""),
+                ("bay", ""),
+                ("only", ""),
+                ("brings", ""),
+                ("you", ""),
+                ("closer", ""),
+            ],
+            0,
+            &[],
+        ),
+        (
+            79_000,
+            false,
+            &[
+                ("Then", ""),
+                ("sing", ""),
+                ("it", ""),
+                ("back", ""),
+                ("to", ""),
+                ("me", ""),
+            ],
+            3_000,
+            &[("sing", ""), ("it", ""), ("back", "")],
+        ),
+        (
+            85_500,
+            true,
+            &[
+                ("I", ""),
+                ("will", ""),
+                ("follow", ""),
+                ("every", ""),
+                ("note", ""),
+            ],
+            500,
+            &[("ooh,", ""), ("every", ""), ("note", "")],
+        ),
+        (
+            92_000,
+            false,
+            &[("光", "hikari"), ("の", "no"), ("中", "naka"), ("で", "de")],
+            3_400,
+            &[("ああ", "aa")],
+        ),
+        (
+            98_500,
+            true,
+            &[("君", "kimi"), ("を", "wo"), ("待ってる", "matteru")],
+            0,
+            &[],
+        ),
+        (
+            105_000,
+            false,
+            &[
+                ("Two", ""),
+                ("small", ""),
+                ("flames", ""),
+                ("on", ""),
+                ("the", ""),
+                ("river", ""),
+            ],
+            3_800,
+            &[("Oh", "")],
+        ),
+        (
+            111_500,
+            true,
+            &[
+                ("Burning", ""),
+                ("all", ""),
+                ("the", ""),
+                ("way", ""),
+                ("home", ""),
+            ],
+            0,
+            &[],
+        ),
+    ];
+    let lines = lines
+        .iter()
+        .map(|(at_ms, opposite, words, background_at, background)| {
+            let lead = syllables(*at_ms, 4_400, words);
+            let text = words
+                .iter()
+                .map(|(text, _)| {
+                    if text.is_ascii() {
+                        format!("{text} ")
+                    } else {
+                        (*text).to_string()
+                    }
+                })
+                .collect::<String>();
+            // The romaji line has a space between the words.
+            let romanized = words.iter().any(|(_, romaji)| !romaji.is_empty()).then(|| {
+                words
+                    .iter()
+                    .map(|(_, romaji)| *romaji)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
+            Line {
+                at_ms: Some(*at_ms),
+                text: text.trim().to_string(),
+                end_ms: Some(at_ms + 5_600),
+                syllables: lead,
+                background: syllables(at_ms + background_at, 1_800, background),
+                opposite: *opposite,
+                romanized,
+            }
+        })
+        .collect();
+    crate::lyrics::Lyrics {
+        lines,
+        synced: true,
+        instrumental: false,
+        rich: true,
+    }
+}
+
 /// Words to go with the sample track, timed so that the one being sung
 /// sits mid-panel at the demo's playback position.
 #[cfg(any(test, feature = "demo"))]
@@ -1598,16 +1797,42 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                     crate::model::SpicyKeyStatus::Working
                 };
             }
-            // Word-by-word Japanese lyrics shown in romaji, in the full-screen
-            // view drawn in the window as it is.
+            // Word-by-word Japanese lyrics with the kanji on top and the
+            // romaji under it, in the full-screen view drawn in the window
+            // as it is.
             "romaji" => {
                 app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics = Loadable::Loaded(Some(sample_japanese_lyrics()));
-                app.settings.lyrics_romanize = true;
+                app.settings
+                    .set_lyrics_script(crate::settings::LyricsScript::KanjiOnTop);
                 app.spicy_key_status = crate::model::SpicyKeyStatus::Working;
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 app.lyrics_fullscreen = Some(false);
+            }
+            // A duet: the second singer on the right, and background vocals
+            // in small italics under their lines. `duet` is the full-screen
+            // view drawn in the window, `duet-panel` is the side panel.
+            "duet" | "duet-panel" => {
+                app.lyrics_uri = app.now_playing().map(|now| now.uri);
+                app.lyrics = Loadable::Loaded(Some(sample_duet_lyrics()));
+                app.spicy_key_status = crate::model::SpicyKeyStatus::Working;
+                app.lyrics_following = true;
+                app.show_lyrics_panel = true;
+                if surface == "duet" {
+                    app.lyrics_fullscreen = Some(false);
+                }
+            }
+            // The lyrics script modes. Put one after `romaji` or `duet`, for
+            // example `romaji,romaji-only`.
+            "romaji-on-top" | "kanji-on-top" | "kanji-only" | "romaji-only" => {
+                use crate::settings::LyricsScript;
+                app.settings.set_lyrics_script(match surface {
+                    "romaji-on-top" => LyricsScript::RomajiOnTop,
+                    "kanji-on-top" => LyricsScript::KanjiOnTop,
+                    "kanji-only" => LyricsScript::KanjiOnly,
+                    _ => LyricsScript::RomajiOnly,
+                });
             }
             "slow-banner" => app.slow_banner = true,
             "audio-key-banner" => app.audio_key_banner = true,

@@ -1371,8 +1371,9 @@ pub enum Action {
     LyricsLineShown(Option<usize>),
     FollowLyrics,
     PauseLyricsFollow,
-    /// Switch the lyrics between the original script and Latin letters.
-    ToggleLyricsRomanize,
+    /// Set which scripts the lyrics show: the original text, the romaji, or
+    /// both, and which one is on the main line.
+    SetLyricsScript(crate::settings::LyricsScript),
     /// Open the Spicy Lyrics key setup and check the key that is set.
     OpenSpicyLyricsSetup,
     /// Ask whether a Spicy Lyrics key is set and whether it works.
