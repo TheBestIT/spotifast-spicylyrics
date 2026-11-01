@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/spicy/demo.mp4">Watch the demo video (MP4, 22 seconds)</a> ·
+  <a href="docs/spicy/demo.mp4">Watch the demo video (MP4, 11 seconds)</a> ·
   <a href="#install">Install</a> ·
   <a href="#set-up-spicy-lyrics">Set up Spicy Lyrics</a> ·
   <a href="#build-from-source">Build from source</a> ·
@@ -40,7 +40,8 @@
 | **Karaoke fill** | The line that plays lights up from left to right, word by word, with a soft edge. Songs with syllable timing fill syllable by syllable. |
 | **Spicy Lyrics source** | Lyrics come from the [Spicy Lyrics API](https://developers.spicylyrics.org) first, with your own free key. Spotify and LRCLIB lyrics stay as the fallback. |
 | **Fill for every synced song** | Songs that have only line timing also fill word by word. The app divides the line time between the words. |
-| **Romaji** | Japanese lyrics can show in Latin letters. The romaji comes from Spicy Lyrics, or from a built-in dictionary when the service has none. |
+| **Romaji modes** | Japanese lyrics show as romaji on top, kanji on top, kanji only or romaji only. The kanji and the romaji fill together. The romaji comes from Spicy Lyrics, or from a built-in dictionary when the service has none. |
+| **Duets** | The lines of the second singer align to the right. Background vocals show as a smaller line under the main line. |
 | **Setup menu** | A Spicy Lyrics menu in the style of the app, with the steps, the links and a key check. Open it from the lyrics header or from Settings. |
 | **Same views** | The side panel, the full screen view and the cinema view all show the fill. Smooth scroll and click-to-seek stay. |
 
@@ -53,7 +54,7 @@ MilkDrop visuals, and 100 to 250 MB of memory. Read the [Spotifast guide](https:
 <table>
   <tr>
     <td width="50%"><img src="docs/spicy/karaoke.png" alt="Full screen lyrics with the cover on the left and the line that plays half filled"><br><sub>Full screen view, the active line half sung</sub></td>
-    <td width="50%"><img src="docs/spicy/romaji.png" alt="Japanese lyrics shown in romaji, with the Romaji button on in the header"><br><sub>Japanese lyrics in romaji</sub></td>
+    <td width="50%"><img src="docs/spicy/romaji.png" alt="Japanese lyrics with the kanji on top and the romaji under them, and the Romaji button in the header"><br><sub>Japanese lyrics, kanji on top</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/spicy/setup.png" alt="The Spicy Lyrics setup dialog with five steps, links and a key field"><br><sub>The Spicy Lyrics setup menu</sub></td>
@@ -148,9 +149,24 @@ variable `SPICY_LYRICS_KEY`. The environment variable wins over the file.
 ## Romaji for Japanese songs
 
 When a song has Japanese lyrics, a **Romaji** button shows in the lyrics
-header. Click it to show the lyrics in Latin letters. The app keeps your
-choice for the next songs. **Settings → Spicy Lyrics → Romaji for Japanese
-lyrics** does the same.
+header. Click it to open a menu with four modes. The app keeps your choice
+for the next songs. **Settings → Spicy Lyrics → Romaji for Japanese lyrics**
+has the same menu.
+
+| Mode | What shows |
+| --- | --- |
+| **Romaji on top** | The romaji is the main line. The kanji show under it. |
+| **Kanji on top** | The kanji are the main line. The romaji show under them. |
+| **Kanji only** | Only the kanji show. This is the default. |
+| **Romaji only** | Only the romaji show. |
+
+In the two modes with both lines, the kanji and the romaji fill together,
+syllable by syllable. A setting from an earlier version with romaji on loads
+as **Romaji only**.
+
+<p align="center">
+  <img src="docs/spicy/romaji-modes.png" alt="Four views of the same Japanese lyrics: romaji on top, kanji on top, kanji only and romaji only" width="900">
+</p>
 
 The romaji has two sources:
 
@@ -162,7 +178,31 @@ The romaji has two sources:
    a small `っ` doubles the next consonant (`言った` → `itta`).
 
 The dictionary gives the usual reading of a word. A song can use a rare
-reading, so a few words can differ from the singer.
+reading, so a few words can differ from the singer. The app makes no romaji
+for background vocal lines, unless the source gives it.
+
+## Duets and background vocals
+
+When the source marks the second singer, the lines of that singer align to
+the right. Each wrapped row of such a line sits flush right. This works in the
+side panel and in the full screen view.
+
+A background vocal shows as a smaller, dimmer, italic line under the main
+line. It stays on the same side as the main line. It has its own fill.
+
+A song without these fields looks as before.
+
+<table>
+  <tr>
+    <td width="60%"><img src="docs/spicy/duet.png" alt="Full screen duet: the line of the second singer is flush right, with a smaller italic background line under it"><br><sub>Full screen view</sub></td>
+    <td width="40%"><img src="docs/spicy/duet-panel.png" alt="The lyrics side panel with a duet: the line of the second singer is flush right, with a background line under it"><br><sub>Lyrics side panel</sub></td>
+  </tr>
+</table>
+
+Limits:
+
+- A background word that starts after the next line starts does not fill.
+- The app makes no romaji for a background line, unless the source gives it.
 
 ## Build from source
 
@@ -277,6 +317,7 @@ no telemetry and no server of its own.
   history of the original stays in this repository.
 - **Versions.** A fork version is the Spotifast version plus a suffix:
   `0.15.0-spicy.1` is the first fork release on Spotifast 0.15.0.
+  `0.15.0-spicy.2` adds the romaji modes and the duet layout.
 - **What changes.** The lyrics features above, the setup menu, the update
   source, the release workflows, and the package metadata (publisher and
   links). Everything else is the same as the original.
