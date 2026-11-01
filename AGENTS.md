@@ -3,6 +3,11 @@
 Follow `CONTRIBUTING.md`; it is the canonical product and contribution policy.
 These instructions add implementation constraints for coding agents.
 
+**Spicy Lyrics fork:** read [`docs/spicy/CONTEXT.md`](docs/spicy/CONTEXT.md)
+first. It gives the fork rules, the build and test commands, demo mode, the
+screenshot method, the release steps and the open work. Update it at the end
+of each task.
+
 ## Product boundaries
 
 - Keep Spotifast a small native Spotify client. Do not add a browser engine,
