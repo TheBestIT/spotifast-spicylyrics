@@ -6432,7 +6432,7 @@ dependencies = [
 
 [[package]]
 name = "spotifast"
-version = "0.15.0-spicy.1"
+version = "0.15.0-spicy.2"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
