@@ -3,7 +3,7 @@
 Read this file first. It tells you how to work on this fork. Update it at the
 end of each task (see "How to update this file").
 
-Last update: 2026-11-01. Version in `Cargo.toml`: `0.15.0-spicy.2`.
+Last update: 2026-11-02. Version in `Cargo.toml`: `0.16.0-spicy.1`.
 
 ## 1. Purpose and fork rules
 
@@ -29,11 +29,11 @@ the same as upstream.
 
 ### Version rule
 
-- The version is `<upstream version>-spicy.<N>`, for example `0.15.0-spicy.1`.
-- `0.15.0` is the upstream version. Do not change it, except in a merge of a
+- The version is `<upstream version>-spicy.<N>`, for example `0.16.0-spicy.1`.
+- `0.16.0` is the upstream version. Do not change it, except in a merge of a
   new upstream release. Then set N to 1.
 - For a fork release on the same upstream version, increase only N.
-- Tags have the form `v0.15.0-spicy.1`. The tag must be equal to the
+- Tags have the form `v0.16.0-spicy.1`. The tag must be equal to the
   `Cargo.toml` version. The release workflow stops when they differ.
 - The workflow `.github/workflows/upstream-watch.yml` checks upstream each day.
   It opens an issue when upstream has a newer release.
@@ -235,8 +235,8 @@ cd /d/Projects/spotifast-spicylyrics/spotifast-src
 cargo test --no-default-features --features demo --lib
 ```
 
-Result on 2026-11-01 after T8: 1498 passed, 0 failed, 3 ignored. The tests
-took 8 s. Before T3, a cold run took 6 min 14 s (5 min 51 s to compile).
+Result on 2026-11-02 after the merge of v0.16.0: 1590 passed, 0 failed,
+3 ignored. The tests took 10 s. Before T3, a cold run took 6 min 14 s (5 min 51 s to compile).
 The 3 ignored tests are upstream tests:
 `credentials::tests::native_store_round_trip` (needs the system credential
 store), `soloist::install::tests::official_windows_archive_extracts` (needs
@@ -435,6 +435,23 @@ Do these steps for a fork release, for example `0.15.0-spicy.2`. Commit
 
 The upstream steps for the website, Homebrew and AUR do not apply to the fork.
 
+### Merge of a new upstream release
+
+The upstream-watch issue tells you the new tag, for example `v0.16.0`.
+
+1. Run `git fetch origin --tags`.
+2. Run `git merge --no-ff --no-commit v0.16.0`. Do not use rebase.
+3. Set the version to `0.16.0-spicy.1` in `Cargo.toml` and `Cargo.lock`.
+4. Keep the fork README (`git checkout --ours README.md`). Change the base
+   version in "The fork and the original".
+5. Put the upstream release and the new fork release at the top of the
+   Flatpak release list.
+6. Make sure that no deleted upstream workflow comes back.
+7. Make sure that `fetch_lyrics` keeps the fork order and that
+   `src/updates.rs` keeps the fork repository.
+8. Do steps 4 to 7 of the release list above in the same merge commit.
+9. Write "Closes #N" in the merge commit message.
+
 ## 9. README rules
 
 - The README is for users. Write it in ASD-STE100.
@@ -453,21 +470,10 @@ The upstream steps for the website, Homebrew and AUR do not apply to the fork.
 
 ## 10. Open work and current state
 
-State on 2026-11-01: `HEAD` is `1c38a40` ("Give the AppImage a PNG icon").
-Version `0.15.0-spicy.1` is released. All tasks (T1 to T8) are done. No
-change is in a commit yet. The tag `v0.15.0-spicy.2` is NOT created.
-
-What is left (each step needs the user's approval):
-
-1. Commit the changes. Use one topic in one commit (section 1), for
-   example: the context file and the capture script, the romaji modes
-   (T3), the duet layout (T4), the README and the media (T5, T7), and
-   "Release 0.15.0-spicy.2" (T6). Each commit must compile and pass the
-   tests. `src/demo.rs` has the T3 and the T4 demo changes together.
-2. Push `main` to `fork` and wait for CI.
-3. Push the tag `v0.15.0-spicy.2` and check the release (section 8).
-4. If the release date is not 2026-11-01, change the date in the Flatpak
-   metainfo before the release commit.
+State on 2026-11-02: the fork is on upstream v0.16.0. The merge commit
+"Merge upstream v0.16.0" sets the version to `0.16.0-spicy.1` and closes
+the upstream-watch issue #3. The release `v0.16.0-spicy.1` follows it.
+No fork task is open.
 
 Known facts:
 
@@ -532,15 +538,8 @@ T8 review result: two bugs found and fixed, each with a regression test.
   release notes follow the AGENTS.md form. `docs/spicy` has no review
   capture: the README names each image.
 
-| Id | Task | State |
-| --- | --- | --- |
-| T1 | Write this context file | Done (not in a commit) |
-| T3 | Romaji display mode switch: romaji on top, kanji on top, kanji only, romaji only. | Done (not in a commit) |
-| T4 | Singer side alignment (`opposite` to the right) and background vocal sub-lines, like the iOS client. | Done (not in a commit) |
-| T5 | New screenshots and video with `scripts/capture-readme-media.ps1`. | Done (not in a commit). New: `romaji-modes.png` (1600x1000), `duet.png`, `duet-panel.png`. Changed: `karaoke.png`, `romaji.png`, `panel.png`, `demo.gif`, `demo.mp4` (11 s). |
-| T6 | Bump the version to `0.15.0-spicy.2` (section 8). | Done (not in a commit). Tag NOT created. |
-| T7 | Update the README for T3 and T4 (section 9). | Done (not in a commit) |
-| T8 | Review all changes: tests, clippy, fmt, images, README. | Done. See "T8 review result". |
+The tasks T1 to T8 (the context file, the romaji modes, the duet layout,
+the media, the README and the review) are in the release `0.15.0-spicy.2`.
 
 ## 11. How to update this file
 

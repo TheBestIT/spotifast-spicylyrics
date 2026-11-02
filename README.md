@@ -313,11 +313,10 @@ no telemetry and no server of its own.
 ## The fork and the original
 
 - **Base.** The fork starts from Spotifast
-  [v0.15.0](https://github.com/crmne/spotifast/releases/tag/v0.15.0). The
+  [v0.16.0](https://github.com/crmne/spotifast/releases/tag/v0.16.0). The
   history of the original stays in this repository.
 - **Versions.** A fork version is the Spotifast version plus a suffix:
-  `0.15.0-spicy.1` is the first fork release on Spotifast 0.15.0.
-  `0.15.0-spicy.2` adds the romaji modes and the duet layout.
+  `0.16.0-spicy.1` is the first fork release on Spotifast 0.16.0.
 - **What changes.** The lyrics features above, the setup menu, the update
   source, the release workflows, and the package metadata (publisher and
   links). Everything else is the same as the original.
