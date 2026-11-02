@@ -24,6 +24,13 @@ jobs:
     name: Linux (format, lints, tests)
     runs-on: ubuntu-24.04
     steps:
+      # The debug test binaries of 0.16.0 fill the disk of the runner.
+      # Remove the large tools that this job does not use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          df -h /
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # rust-toolchain.toml pins the compiler; install its components.
