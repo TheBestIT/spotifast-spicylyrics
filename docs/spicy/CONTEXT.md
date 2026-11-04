@@ -3,7 +3,7 @@
 Read this file first. It tells you how to work on this fork. Update it at the
 end of each task (see "How to update this file").
 
-Last update: 2026-11-02. Version in `Cargo.toml`: `0.16.0-spicy.1`.
+Last update: 2026-11-04. Version in `Cargo.toml`: `0.17.1-spicy.1`.
 
 ## 1. Purpose and fork rules
 
@@ -235,8 +235,10 @@ cd /d/Projects/spotifast-spicylyrics/spotifast-src
 cargo test --no-default-features --features demo --lib
 ```
 
-Result on 2026-11-02 after the merge of v0.16.0: 1590 passed, 0 failed,
-3 ignored. The tests took 10 s. Before T3, a cold run took 6 min 14 s (5 min 51 s to compile).
+Result on 2026-11-04 after the merge of v0.17.1: 1805 passed, 0 failed,
+3 ignored. The tests took 12 s. The compile after the merge took 5 min 4 s.
+The first line of the output is a child process test (1 passed, 1807
+filtered out). This is correct.
 The 3 ignored tests are upstream tests:
 `credentials::tests::native_store_round_trip` (needs the system credential
 store), `soloist::install::tests::official_windows_archive_extracts` (needs
@@ -272,8 +274,15 @@ cargo fmt --all --check
 cargo clippy --no-default-features --features demo --all-targets -- -D warnings
 ```
 
-Result on 2026-11-01 after T8: `cargo fmt --all --check` passed. The clippy
-command passed with no warnings in 1 min 47 s.
+Result on 2026-11-04 after the merge of v0.17.1: `cargo fmt --all --check`
+passed. The clippy command passed with no warnings in 39 s (3 min 19 s
+after the merge, with a cold cache).
+
+Upstream builds with MilkDrop. Thus upstream code can have items that only
+MilkDrop code uses. Without MilkDrop, clippy then stops with "never used".
+Put `#[cfg(feature = "milkdrop")]` on such an item. The merge of v0.17.1
+did this for 6 items (in `app.rs`, `milkdrop.rs`, `ui/lyrics.rs`,
+`ui/winamp/wmp.rs` and `demo.rs`).
 
 The fork CI (`.github/workflows/ci.yml`) runs `cargo fmt --check`,
 `cargo clippy --all-targets --features demo -- -D warnings` and
@@ -470,12 +479,25 @@ The upstream-watch issue tells you the new tag, for example `v0.16.0`.
 
 ## 10. Open work and current state
 
-State on 2026-11-02: the fork is on upstream v0.16.0. The merge commit
-"Merge upstream v0.16.0" sets the version to `0.16.0-spicy.1` and closes
-the upstream-watch issue #3. The release `v0.16.0-spicy.1` follows it.
-No fork task is open.
+State on 2026-11-04: the fork is on upstream v0.17.1 (with v0.17.0). The
+merge commit "Merge upstream v0.17.1" sets the version to `0.17.1-spicy.1`
+and closes the upstream-watch issues #4 and #5. The commit is local. The
+push and the tag `v0.17.1-spicy.1` are the next steps, with the user's
+approval.
 
 Known facts:
+
+- Upstream 0.17.0 makes the sung line in full screen larger
+  (`SUNG_LINE_GROWTH`) and gives it the accent colour. The fork keeps its
+  own line renderer: no growth, quiet lines at 0.68 opacity, the sung line
+  fills in the text colour. The merge removed `SUNG_LINE_GROWTH` and
+  removed the accent check from the demo test
+  `fullscreen_lyrics_highlight_preserves_line_layout`.
+- Upstream 0.17.0 shows a music note for a timed line with no words in full
+  screen. The fork renderer does not do this.
+- Upstream 0.17.0 can show MilkDrop behind the full screen lyrics. A click
+  on a lyrics line (also an untimed one) does not reach the backdrop. The
+  fork keeps this rule (`Sense::click()` for each line).
 
 - T3 replaced the romaji switch with `settings.lyrics_script`
   (`LyricsScript`: `RomajiOnTop`, `KanjiOnTop`, `KanjiOnly`, `RomajiOnly`).
