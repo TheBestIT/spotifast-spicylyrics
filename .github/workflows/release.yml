@@ -160,6 +160,7 @@ jobs:
             dist/*.zip
             dist/*-setup.exe
           if-no-files-found: error
+          retention-days: 1
 
   # The Linux build packaged as a Flatpak bundle: the same binary, in the
   # sandbox packaging/flatpak describes, so nothing compiles twice. Flathub
@@ -192,6 +193,7 @@ jobs:
           name: flatpak
           path: "*.flatpak"
           if-no-files-found: error
+          retention-days: 1
 
   publish:
     name: GitHub release
