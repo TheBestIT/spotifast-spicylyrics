@@ -3,7 +3,7 @@
 Read this file first. It tells you how to work on this fork. Update it at the
 end of each task (see "How to update this file").
 
-Last update: 2026-11-04. Version in `Cargo.toml`: `0.17.1-spicy.1`.
+Last update: 2026-11-17. Version in `Cargo.toml`: `0.17.2-spicy.1`.
 
 ## 1. Purpose and fork rules
 
@@ -14,6 +14,8 @@ the same as upstream.
 
 - The fork repository is `TheBestIT/spotifast-spicylyrics` (git remote `fork`).
 - The upstream repository is `crmne/spotifast` (git remote `origin`).
+  On the Linux agent computer the names differ: `origin` is the fork and
+  `upstream` is the original.
 - The working branch is `main`. Push to `fork`. Never push to `origin`.
 - Change only the lyrics features, the setup menu, the update source, the
   release workflows and the package metadata. Keep other upstream code as it is.
@@ -103,6 +105,7 @@ The sibling folder `D:\Projects\spotifast-ios` holds the iOS client
 | `docs/UPSTREAM-README.md` | The upstream README. |
 | `scripts/build-windows.ps1`, `scripts/build-linux.sh` | The public build scripts that the README tells users to run. |
 | `scripts/capture-readme-media.ps1` | Makes the README images and the demo video from demo mode (see section 7). |
+| `scripts/capture-readme-media.sh` | The same on Linux, with Xvfb, ImageMagick and ffmpeg (see section 7). |
 | `packaging/release-notes/v*-spicy.*.md` | The fork release notes. |
 | `packaging/flatpak/rocks.spotifast.Spotifast.metainfo.xml` | The Flatpak release list. Each fork release has an entry. |
 | `.github/workflows/` | `ci.yml` (fork CI), `release.yml` (tag to release), `packages.yml` (Linux packages), `upstream-watch.yml` (daily upstream check). |
@@ -235,16 +238,15 @@ cd /d/Projects/spotifast-spicylyrics/spotifast-src
 cargo test --no-default-features --features demo --lib
 ```
 
-Result on 2026-11-04 after the merge of v0.17.1: 1805 passed, 0 failed,
-3 ignored. The tests took 12 s. The compile after the merge took 5 min 4 s.
-The first line of the output is a child process test (1 passed, 1807
-filtered out). This is correct.
-The 3 ignored tests are upstream tests:
-`credentials::tests::native_store_round_trip` (needs the system credential
-store), `soloist::install::tests::official_windows_archive_extracts` (needs
-`SOLOIST_QA_ZIP`) and `soloist::tests::native_start_and_stop` (needs
-`SOLOIST_QA_KEY`). Do not run them for lyrics work. No test failed or was
-flaky in this run. No flaky test is known at this time.
+Result on 2026-11-17 after the merge of v0.17.2 (Linux, native target,
+command `cargo test --locked --all-targets --features demo`): all passed.
+The lib had 1945 passed and 14 ignored. The `spotifast` program had 17
+passed. The compile took about 5 min.
+The ignored tests are upstream tests that need a system credential store,
+a Soloist archive or a Soloist key. Do not run them for lyrics work.
+No test failed or was flaky in this run.
+
+No flaky test is known at this time.
 
 To run only the lyrics, line renderer and romaji tests (about 1 s after a
 build):
@@ -274,9 +276,10 @@ cargo fmt --all --check
 cargo clippy --no-default-features --features demo --all-targets -- -D warnings
 ```
 
-Result on 2026-11-04 after the merge of v0.17.1: `cargo fmt --all --check`
-passed. The clippy command passed with no warnings in 39 s (3 min 19 s
-after the merge, with a cold cache).
+Result on 2026-11-17 after the merge of v0.17.2 (Linux, with
+`cargo clippy --locked --all-targets --features demo -- -D warnings`):
+`cargo fmt --all --check` passed. Clippy passed with no warnings (4 min 48 s,
+cold cache).
 
 Upstream builds with MilkDrop. Thus upstream code can have items that only
 MilkDrop code uses. Without MilkDrop, clippy then stops with "never used".
@@ -399,6 +402,31 @@ files stay. Sizes: `karaoke.png` 763 KB, `romaji.png` 739 KB,
 `romaji-modes.png` 702 KB, `duet.png` 737 KB, `duet-panel.png` 610 KB,
 `panel.png` 634 KB. All single images are 1280x800.
 
+### Linux method (Xvfb, ImageMagick, ffmpeg)
+
+On Linux, use `scripts/capture-readme-media.sh`. It does the same steps as
+the PowerShell script:
+
+```sh
+cargo build --release --features demo
+TMPDIR=/work/tmp scripts/capture-readme-media.sh /work/shots
+```
+
+- It runs the demo build once for each image under `xvfb-run`
+  (`-screen 0 1600x1000x24`) and uses the same surfaces, sizes and delay as
+  the table above.
+- `romaji-modes.png` is made with ImageMagick (`convert` for the label,
+  `montage` for the 2x2 grid of 800x500 cells).
+- The video frames go to ffmpeg with the same options as the PowerShell
+  script.
+- The files go to the `new` folder in the output folder. Look at each file,
+  then copy it over the old file in `docs/spicy`.
+- Xvfb draws with software OpenGL (llvmpipe). It is slow: the 330 frames
+  take 17.9 s of demo time, not 11 s. The GIF has 269 frames. This is
+  correct. The Windows capture is faster.
+- Result on 2026-11-17 (0.17.2-spicy.1): all 8 images and the video were
+  made. `demo.mp4` is 1440x900, 17.9 s, 496 KB. `demo.gif` is 900x563, 2.3 MB.
+
 To capture one view by hand:
 
 ```powershell
@@ -479,11 +507,15 @@ The upstream-watch issue tells you the new tag, for example `v0.16.0`.
 
 ## 10. Open work and current state
 
-State on 2026-11-04: the fork is on upstream v0.17.1 (with v0.17.0). The
-merge commit "Merge upstream v0.17.1" sets the version to `0.17.1-spicy.1`
-and closes the upstream-watch issues #4 and #5. The commit is local. The
-push and the tag `v0.17.1-spicy.1` are the next steps, with the user's
-approval.
+State on 2026-11-17: the fork is on upstream v0.17.2. The merge commit
+"Merge upstream v0.17.2" sets the version to `0.17.2-spicy.1` and closes the
+upstream-watch issue #6. The commits are local. The push and the tag
+`v0.17.2-spicy.1` are the next steps, with the user's approval.
+
+Upstream 0.17.2 has a self-update feature. `src/updates.rs` keeps the fork
+repository and the fork key. The `DOWNLOADS` constant and the package manager
+update commands in that file still name the upstream repository. They apply
+to package manager installs of the original, not to the fork builds.
 
 Known facts:
 
